@@ -1405,17 +1405,8 @@ bool get_target_extruder_from_command(const uint16_t code) {
    * at the same positions relative to the machine.
    */
   void update_software_endstops(const AxisEnum axis) {
-    const float offs = 0.0
-      #if HAS_HOME_OFFSET
-        + home_offset[axis]
-      #endif
-      #if HAS_POSITION_SHIFT
-        + position_shift[axis]
-      #endif
-    ;
-
     #if HAS_HOME_OFFSET && HAS_POSITION_SHIFT
-      workspace_offset[axis] = offs;
+      workspace_offset[axis] = home_offset[axis] + position_shift[axis];
     #endif
 
     #if ENABLED(DUAL_X_CARRIAGE)
@@ -1426,27 +1417,27 @@ bool get_target_extruder_from_command(const uint16_t code) {
 
         if (active_extruder != 0) {
           // T1 can move from X2_MIN_POS to X2_MAX_POS or X2 home position (whichever is larger)
-          soft_endstop_min[X_AXIS] = X2_MIN_POS + offs;
-          soft_endstop_max[X_AXIS] = dual_max_x + offs;
+          soft_endstop_min[X_AXIS] = X2_MIN_POS;
+          soft_endstop_max[X_AXIS] = dual_max_x;
         }
         else if (dual_x_carriage_mode == DXC_DUPLICATION_MODE) {
           // In Duplication Mode, T0 can move as far left as X_MIN_POS
           // but not so far to the right that T1 would move past the end
-          soft_endstop_min[X_AXIS] = base_min_pos(X_AXIS) + offs;
-          soft_endstop_max[X_AXIS] = min(base_max_pos(X_AXIS), dual_max_x - duplicate_extruder_x_offset) + offs;
+          soft_endstop_min[X_AXIS] = base_min_pos(X_AXIS);
+          soft_endstop_max[X_AXIS] = min(base_max_pos(X_AXIS), dual_max_x - duplicate_extruder_x_offset);
         }
         else {
           // In other modes, T0 can move from X_MIN_POS to X_MAX_POS
-          soft_endstop_min[axis] = base_min_pos(axis) + offs;
-          soft_endstop_max[axis] = base_max_pos(axis) + offs;
+          soft_endstop_min[axis] = base_min_pos(axis);
+          soft_endstop_max[axis] = base_max_pos(axis);
         }
       }
     #elif ENABLED(DELTA)
-      soft_endstop_min[axis] = base_min_pos(axis) + offs;
-      soft_endstop_max[axis] = (axis == Z_AXIS ? delta_height : base_max_pos(axis)) + offs;
+      soft_endstop_min[axis] = base_min_pos(axis);
+      soft_endstop_max[axis] = axis == Z_AXIS ? delta_height : base_max_pos(axis);
     #else
-      soft_endstop_min[axis] = base_min_pos(axis) + offs;
-      soft_endstop_max[axis] = base_max_pos(axis) + offs;
+      soft_endstop_min[axis] = base_min_pos(axis);
+      soft_endstop_max[axis] = base_max_pos(axis);
     #endif
 
     #if ENABLED(DEBUG_LEVELING_FEATURE)
@@ -3662,7 +3653,7 @@ inline void gcode_G4() {
 #if ENABLED(CNC_COORDINATE_SYSTEMS)
 
   /**
-   * Select a coordinate system and update the current position.
+   * Select a coordinate system and update the workspace offset.
    * System index -1 is used to specify machine-native.
    */
   bool select_coordinate_system(const int8_t _new) {
@@ -3673,16 +3664,13 @@ inline void gcode_G4() {
     if (WITHIN(_new, 0, MAX_COORDINATE_SYSTEMS - 1))
       COPY(new_offset, coordinate_system[_new]);
     active_coordinate_system = _new;
-    bool didXYZ = false;
     LOOP_XYZ(i) {
       const float diff = new_offset[i] - old_offset[i];
       if (diff) {
         position_shift[i] += diff;
         update_software_endstops((AxisEnum)i);
-        didXYZ = true;
       }
     }
-    if (didXYZ) SYNC_PLAN_POSITION_KINEMATIC();
     return true;
   }
 
@@ -6266,7 +6254,12 @@ inline void gcode_G92() {
     #define IS_G92_0 true
   #endif
 
-  bool didXYZ = false, didE = false;
+  bool didE = false;
+  #if IS_SCARA || !HAS_POSITION_SHIFT
+    bool didXYZ = false;
+  #else
+    constexpr bool didXYZ = false;
+  #endif
 
   if (IS_G92_0) LOOP_XYZE(i) {
     if (parser.seenval(axis_codes[i])) {
@@ -6274,18 +6267,18 @@ inline void gcode_G92() {
                   v = i == E_AXIS ? l : LOGICAL_TO_NATIVE(l, i),
                   d = v - current_position[i];
       if (!NEAR_ZERO(d)) {
-        if (i == E_AXIS) didE = true; else didXYZ = true;
-        #if IS_SCARA
-          current_position[i] = v;        // For SCARA just set the position directly
+        #if IS_SCARA || !HAS_POSITION_SHIFT
+          if (i == E_AXIS) didE = true; else didXYZ = true;
+          current_position[i] = v;        // Without workspaces revert to Marlin 1.0 behavior
         #elif HAS_POSITION_SHIFT
-          if (i == E_AXIS)
+          if (i == E_AXIS) {
+            didE = true;
             current_position[E_AXIS] = v; // When using coordinate spaces, only E is set directly
+          }
           else {
             position_shift[i] += d;       // Other axes simply offset the coordinate space
             update_software_endstops((AxisEnum)i);
           }
-        #else
-          current_position[i] = v;        // Without workspaces revert to Marlin 1.0 behavior
         #endif
       }
     }
@@ -6449,6 +6442,7 @@ inline void gcode_G92() {
         const float spindle_laser_power = parser.floatval('S');
         if (spindle_laser_power == 0) {
           WRITE(SPINDLE_LASER_ENABLE_PIN, !SPINDLE_LASER_ENABLE_INVERT);                                    // turn spindle off (active low)
+          analogWrite(SPINDLE_LASER_PWM_PIN, SPINDLE_LASER_PWM_INVERT ? 255 : 0);                           // only write low byte
           delay_for_power_down();
         }
         else {
@@ -7798,7 +7792,6 @@ inline void gcode_M105() {
     if (p < FAN_COUNT) {
       #if ENABLED(EXTRA_FAN_SPEED)
         const int16_t t = parser.intval('T');
-        NOMORE(t, 255);
         if (t > 0) {
           switch (t) {
             case 1:
@@ -7809,7 +7802,7 @@ inline void gcode_M105() {
               fanSpeeds[p] = new_fanSpeeds[p];
               break;
             default:
-              new_fanSpeeds[p] = t;
+              new_fanSpeeds[p] = min(t, 255);
               break;
           }
           return;
@@ -8471,7 +8464,7 @@ void report_current_position() {
   SERIAL_PROTOCOLPGM("X:");
   SERIAL_PROTOCOL(LOGICAL_X_POSITION(current_position[X_AXIS]));
   SERIAL_PROTOCOLPGM(" Y:");
-  SERIAL_PROTOCOL(LOGICAL_X_POSITION(current_position[Y_AXIS]));
+  SERIAL_PROTOCOL(LOGICAL_Y_POSITION(current_position[Y_AXIS]));
   SERIAL_PROTOCOLPGM(" Z:");
   SERIAL_PROTOCOL(LOGICAL_Z_POSITION(current_position[Z_AXIS]));
   SERIAL_PROTOCOLPGM(" E:");
@@ -8516,15 +8509,18 @@ void report_current_position() {
     SERIAL_PROTOCOLPGM("Raw:    ");
     report_xyz(current_position);
 
-    SERIAL_PROTOCOLPGM("Leveled:");
     float leveled[XYZ] = { current_position[X_AXIS], current_position[Y_AXIS], current_position[Z_AXIS] };
-    planner.apply_leveling(leveled);
-    report_xyz(leveled);
 
-    SERIAL_PROTOCOLPGM("UnLevel:");
-    float unleveled[XYZ] = { leveled[X_AXIS], leveled[Y_AXIS], leveled[Z_AXIS] };
-    planner.unapply_leveling(unleveled);
-    report_xyz(unleveled);
+    #if PLANNER_LEVELING
+      SERIAL_PROTOCOLPGM("Leveled:");
+      planner.apply_leveling(leveled);
+      report_xyz(leveled);
+
+      SERIAL_PROTOCOLPGM("UnLevel:");
+      float unleveled[XYZ] = { leveled[X_AXIS], leveled[Y_AXIS], leveled[Z_AXIS] };
+      planner.unapply_leveling(unleveled);
+      report_xyz(unleveled);
+    #endif
 
     #if IS_KINEMATIC
       #if IS_SCARA
@@ -9313,8 +9309,7 @@ inline void gcode_M226() {
     #if ENABLED(BABYSTEP_XY)
       for (uint8_t a = X_AXIS; a <= Z_AXIS; a++)
         if (parser.seenval(axis_codes[a]) || (a == Z_AXIS && parser.seenval('S'))) {
-          float offs = parser.value_axis_units(a);
-          constrain(offs, -2, 2);
+          const float offs = constrain(parser.value_axis_units(a), -2, 2);
           #if ENABLED(BABYSTEP_ZPROBE_OFFSET)
             if (a == Z_AXIS) {
               zprobe_zoffset += offs;
@@ -9325,13 +9320,12 @@ inline void gcode_M226() {
         }
     #else
       if (parser.seenval('Z') || parser.seenval('S')) {
-        float offs = parser.value_axis_units(Z_AXIS);
-        constrain(offs, -2, 2);
+        const float offs = constrain(parser.value_axis_units(Z_AXIS), -2, 2);
         #if ENABLED(BABYSTEP_ZPROBE_OFFSET)
           zprobe_zoffset += offs;
           refresh_zprobe_zoffset(); // This will babystep the axis
         #else
-          thermalManager.babystep_axis(Z_AXIS, parser.value_axis_units(Z_AXIS) * planner.axis_steps_per_mm[Z_AXIS]);
+          thermalManager.babystep_axis(Z_AXIS, offs * planner.axis_steps_per_mm[Z_AXIS]);
         #endif
       }
     #endif
@@ -9967,31 +9961,27 @@ void quickstop_stepper() {
    *       Use M206 to set these values directly.
    */
   inline void gcode_M428() {
-    bool err = false;
+    if (axis_unhomed_error()) return;
+
+    float diff[XYZ];
     LOOP_XYZ(i) {
-      if (axis_homed[i]) {
-        const float base = (current_position[i] > (soft_endstop_min[i] + soft_endstop_max[i]) * 0.5) ? base_home_pos((AxisEnum)i) : 0,
-                    diff = base - current_position[i];
-        if (WITHIN(diff, -20, 20)) {
-          set_home_offset((AxisEnum)i, diff);
-        }
-        else {
-          SERIAL_ERROR_START();
-          SERIAL_ERRORLNPGM(MSG_ERR_M428_TOO_FAR);
-          LCD_ALERTMESSAGEPGM("Err: Too far!");
-          BUZZ(200, 40);
-          err = true;
-          break;
-        }
+      diff[i] = base_home_pos((AxisEnum)i) - current_position[i];
+      if (!WITHIN(diff[i], -20, 20) && home_dir((AxisEnum)i) > 0)
+        diff[i] = -current_position[i];
+      if (!WITHIN(diff[i], -20, 20)) {
+        SERIAL_ERROR_START();
+        SERIAL_ERRORLNPGM(MSG_ERR_M428_TOO_FAR);
+        LCD_ALERTMESSAGEPGM("Err: Too far!");
+        BUZZ(200, 40);
+        return;
       }
     }
 
-    if (!err) {
-      report_current_position();
-      LCD_MESSAGEPGM(MSG_HOME_OFFSETS_APPLIED);
-      BUZZ(100, 659);
-      BUZZ(100, 698);
-    }
+    LOOP_XYZ(i) set_home_offset((AxisEnum)i, diff[i]);
+    report_current_position();
+    LCD_MESSAGEPGM(MSG_HOME_OFFSETS_APPLIED);
+    BUZZ(100, 659);
+    BUZZ(100, 698);
   }
 
 #endif // HAS_M206_COMMAND
@@ -11143,14 +11133,6 @@ void tool_change(const uint8_t tmp_extruder, const float fr_mm_s/*=0.0*/, bool n
           // The newly-selected extruder XY is actually at...
           current_position[X_AXIS] += xydiff[X_AXIS];
           current_position[Y_AXIS] += xydiff[Y_AXIS];
-          #if HAS_WORKSPACE_OFFSET || ENABLED(DUAL_X_CARRIAGE) || ENABLED(PARKING_EXTRUDER)
-            for (uint8_t i = X_AXIS; i <= Y_AXIS; i++) {
-              #if HAS_POSITION_SHIFT
-                position_shift[i] += xydiff[i];
-              #endif
-              update_software_endstops((AxisEnum)i);
-            }
-          #endif
 
           // Set the new active extruder
           active_extruder = tmp_extruder;
@@ -13809,7 +13791,7 @@ void setup() {
     Max7219_init();
   #endif
 
-  #ifdef DISABLE_JTAG
+  #if ENABLED(DISABLE_JTAG)
     // Disable JTAG on AT90USB chips to free up pins for IO
     MCUCR = 0x80;
     MCUCR = 0x80;
