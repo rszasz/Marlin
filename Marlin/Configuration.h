@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Marlin 3D Printer Firmware
  * Copyright (C) 2016 MarlinFirmware [https://github.com/MarlinFirmware/Marlin]
  *
@@ -262,7 +262,7 @@
  *    10 : 100k RS thermistor 198-961 (4.7k pullup)
  *    11 : 100k beta 3950 1% thermistor (4.7k pullup)
  *    12 : 100k 0603 SMD Vishay NTCS0603E3104FXT (4.7k pullup) (calibrated for Makibox hot bed)
- *    13 : 100k Hisens 3950  1% up to 300°C for hotend "Simple ONE " & "Hotend "All In ONE"
+ *    13 : 100k Hisens 3950  1% up to 300Â°C for hotend "Simple ONE " & "Hotend "All In ONE"
  *    20 : the PT100 circuit found in the Ultimainboard V2.x
  *    60 : 100k Maker's Tool Works Kapton Bed Thermistor beta=3950
  *    66 : 4.7M High Temperature thermistor from Dyze Design
@@ -281,10 +281,10 @@
  *   110 : Pt100 with 1k pullup (non standard)
  *
  *         Use these for Testing or Development purposes. NEVER for production machine.
- *   998 : Dummy Table that ALWAYS reads 25°C or the temperature defined below.
- *   999 : Dummy Table that ALWAYS reads 100°C or the temperature defined below.
+ *   998 : Dummy Table that ALWAYS reads 25Â°C or the temperature defined below.
+ *   999 : Dummy Table that ALWAYS reads 100Â°C or the temperature defined below.
  *
- * :{ '0': "Not used", '1':"100k / 4.7k - EPCOS", '2':"200k / 4.7k - ATC Semitec 204GT-2", '3':"Mendel-parts / 4.7k", '4':"10k !! do not use for a hotend. Bad resolution at high temp. !!", '5':"100K / 4.7k - ATC Semitec 104GT-2 (Used in ParCan & J-Head)", '6':"100k / 4.7k EPCOS - Not as accurate as Table 1", '7':"100k / 4.7k Honeywell 135-104LAG-J01", '8':"100k / 4.7k 0603 SMD Vishay NTCS0603E3104FXT", '9':"100k / 4.7k GE Sensing AL03006-58.2K-97-G1", '10':"100k / 4.7k RS 198-961", '11':"100k / 4.7k beta 3950 1%", '12':"100k / 4.7k 0603 SMD Vishay NTCS0603E3104FXT (calibrated for Makibox hot bed)", '13':"100k Hisens 3950  1% up to 300°C for hotend 'Simple ONE ' & hotend 'All In ONE'", '20':"PT100 (Ultimainboard V2.x)", '51':"100k / 1k - EPCOS", '52':"200k / 1k - ATC Semitec 204GT-2", '55':"100k / 1k - ATC Semitec 104GT-2 (Used in ParCan & J-Head)", '60':"100k Maker's Tool Works Kapton Bed Thermistor beta=3950", '66':"Dyze Design 4.7M High Temperature thermistor", '70':"the 100K thermistor found in the bq Hephestos 2", '71':"100k / 4.7k Honeywell 135-104LAF-J01", '147':"Pt100 / 4.7k", '1047':"Pt1000 / 4.7k", '110':"Pt100 / 1k (non-standard)", '1010':"Pt1000 / 1k (non standard)", '-3':"Thermocouple + MAX31855 (only for sensor 0)", '-2':"Thermocouple + MAX6675 (only for sensor 0)", '-1':"Thermocouple + AD595",'998':"Dummy 1", '999':"Dummy 2" }
+ * :{ '0': "Not used", '1':"100k / 4.7k - EPCOS", '2':"200k / 4.7k - ATC Semitec 204GT-2", '3':"Mendel-parts / 4.7k", '4':"10k !! do not use for a hotend. Bad resolution at high temp. !!", '5':"100K / 4.7k - ATC Semitec 104GT-2 (Used in ParCan & J-Head)", '6':"100k / 4.7k EPCOS - Not as accurate as Table 1", '7':"100k / 4.7k Honeywell 135-104LAG-J01", '8':"100k / 4.7k 0603 SMD Vishay NTCS0603E3104FXT", '9':"100k / 4.7k GE Sensing AL03006-58.2K-97-G1", '10':"100k / 4.7k RS 198-961", '11':"100k / 4.7k beta 3950 1%", '12':"100k / 4.7k 0603 SMD Vishay NTCS0603E3104FXT (calibrated for Makibox hot bed)", '13':"100k Hisens 3950  1% up to 300Â°C for hotend 'Simple ONE ' & hotend 'All In ONE'", '20':"PT100 (Ultimainboard V2.x)", '51':"100k / 1k - EPCOS", '52':"200k / 1k - ATC Semitec 204GT-2", '55':"100k / 1k - ATC Semitec 104GT-2 (Used in ParCan & J-Head)", '60':"100k Maker's Tool Works Kapton Bed Thermistor beta=3950", '66':"Dyze Design 4.7M High Temperature thermistor", '70':"the 100K thermistor found in the bq Hephestos 2", '71':"100k / 4.7k Honeywell 135-104LAF-J01", '147':"Pt100 / 4.7k", '1047':"Pt1000 / 4.7k", '110':"Pt100 / 1k (non-standard)", '1010':"Pt1000 / 1k (non standard)", '-3':"Thermocouple + MAX31855 (only for sensor 0)", '-2':"Thermocouple + MAX6675 (only for sensor 0)", '-1':"Thermocouple + AD595",'998':"Dummy 1", '999':"Dummy 2" }
  */
 #define TEMP_SENSOR_0 5
 #define TEMP_SENSOR_1 0
@@ -300,7 +300,7 @@
 // Use temp sensor 1 as a redundant sensor with sensor 0. If the readings
 // from the two sensors differ too much the print will be aborted.
 //#define TEMP_SENSOR_1_AS_REDUNDANT
-#define MAX_REDUNDANT_TEMP_SENSOR_DIFF 5
+#define MAX_REDUNDANT_TEMP_SENSOR_DIFF 10
 
 // Extruder temperature must be close to target for this long before M109 returns success
 #define TEMP_RESIDENCY_TIME 10  // (seconds)
@@ -308,7 +308,7 @@
 #define TEMP_WINDOW     1       // (degC) Window around target to start the residency timer x degC early.
 
 // Bed temperature must be close to target for this long before M190 returns success
-#define TEMP_BED_RESIDENCY_TIME 0   // (seconds)
+#define TEMP_BED_RESIDENCY_TIME 10  // (seconds)
 #define TEMP_BED_HYSTERESIS 3       // (degC) range of +/- temperatures considered "close" to the target one
 #define TEMP_BED_WINDOW     1       // (degC) Window around target to start the residency timer x degC early.
 
@@ -317,6 +317,9 @@
 // Otherwise this would lead to the heater being powered on all the time.
 #define HEATER_0_MINTEMP 5
 #define HEATER_1_MINTEMP 5
+#define HEATER_2_MINTEMP 5
+#define HEATER_3_MINTEMP 5
+#define HEATER_4_MINTEMP 5
 #define BED_MINTEMP 5
 
 // When temperature exceeds max temp, your heater will be switched off.
@@ -324,7 +327,10 @@
 // You should use MINTEMP for thermistor short/failure protection.
 #define HEATER_0_MAXTEMP 275
 #define HEATER_1_MAXTEMP 275
-#define BED_MAXTEMP 120
+#define HEATER_2_MAXTEMP 275
+#define HEATER_3_MAXTEMP 275
+#define HEATER_4_MAXTEMP 275
+#define BED_MAXTEMP 150
 
 //===========================================================================
 //============================= PID Settings ================================
@@ -561,13 +567,13 @@
 #endif
 
 // Mechanical endstop with COM to ground and NC to Signal uses "false" here (most common setup).
-#define X_MIN_ENDSTOP_INVERTING false  // set to true to invert the logic of the endstop.
-#define Y_MIN_ENDSTOP_INVERTING false  // set to true to invert the logic of the endstop.
-#define Z_MIN_ENDSTOP_INVERTING false  // set to true to invert the logic of the endstop.
-#define X_MAX_ENDSTOP_INVERTING false  // set to true to invert the logic of the endstop.
-#define Y_MAX_ENDSTOP_INVERTING false  // set to true to invert the logic of the endstop.
-#define Z_MAX_ENDSTOP_INVERTING false  // set to true to invert the logic of the endstop.
-#define Z_MIN_PROBE_ENDSTOP_INVERTING false  // set to true to invert the logic of the probe.
+#define X_MIN_ENDSTOP_INVERTING false // set to true to invert the logic of the endstop.
+#define Y_MIN_ENDSTOP_INVERTING false // set to true to invert the logic of the endstop.
+#define Z_MIN_ENDSTOP_INVERTING false // set to true to invert the logic of the endstop.
+#define X_MAX_ENDSTOP_INVERTING false // set to true to invert the logic of the endstop.
+#define Y_MAX_ENDSTOP_INVERTING false // set to true to invert the logic of the endstop.
+#define Z_MAX_ENDSTOP_INVERTING false // set to true to invert the logic of the endstop.
+#define Z_MIN_PROBE_ENDSTOP_INVERTING false // set to true to invert the logic of the probe.
 
 // Enable this feature if all enabled endstop pins are interrupt-capable.
 // This will remove the need to poll the interrupt pins, saving many CPU cycles.
@@ -1003,19 +1009,10 @@
   // Gradually reduce leveling correction until a set height is reached,
   // at which point movement will be level to the machine's XY plane.
   // The height can be set with M420 Z<height>
-<<<<<<< .merge_file_a17896
   //#define ENABLE_LEVELING_FADE_HEIGHT
 
   // Set the boundaries for probing (where the probe can reach).
   #define DELTA_PROBEABLE_RADIUS (DELTA_PRINTABLE_RADIUS - 10)
-=======
-  #define ENABLE_LEVELING_FADE_HEIGHT
-
-  // For Cartesian machines, instead of dividing moves on mesh boundaries,
-  // split up moves into short segments like a Delta. This follows the
-  // contours of the bed more closely than edge-to-edge straight moves.
-  #define SEGMENT_LEVELED_MOVES
-  #define LEVELED_SEGMENT_LENGTH 5.0 // (mm) Length of all segments (except the last one)
 
   /**
    * Enable the G26 Mesh Validation Pattern tool.
@@ -1024,10 +1021,9 @@
   #if ENABLED(G26_MESH_VALIDATION)
     #define MESH_TEST_NOZZLE_SIZE     0.4   // (mm) Diameter of primary nozzle.
     #define MESH_TEST_LAYER_HEIGHT    0.2   // (mm) Default layer height for the G26 Mesh Validation Tool.
-    #define MESH_TEST_HOTEND_TEMP   205.0   // (°C) Default nozzle temperature for the G26 Mesh Validation Tool.
-    #define MESH_TEST_BED_TEMP       60.0   // (°C) Default bed temperature for the G26 Mesh Validation Tool.
+    #define MESH_TEST_HOTEND_TEMP   205.0   // (Â°C) Default nozzle temperature for the G26 Mesh Validation Tool.
+    #define MESH_TEST_BED_TEMP       60.0   // (Â°C) Default bed temperature for the G26 Mesh Validation Tool.
   #endif
->>>>>>> .merge_file_a14660
 
 #endif
 
@@ -1099,19 +1095,6 @@
   #define UBL_PROBE_PT_3_X _PX(DELTA_PROBEABLE_RADIUS, 240)
   #define UBL_PROBE_PT_3_Y _PY(DELTA_PROBEABLE_RADIUS, 240)
 
-
-<<<<<<< .merge_file_a17896
-  #define UBL_G26_MESH_VALIDATION   // Enable G26 mesh validation
-  //#define UBL_G26_MESH_VALIDATION // Enable G26 mesh validation
-  #if ENABLED(UBL_G26_MESH_VALIDATION)
-    #define MESH_TEST_NOZZLE_SIZE     0.4   // (mm) Diameter of primary nozzle.
-    #define MESH_TEST_LAYER_HEIGHT    0.2   // (mm) Default layer height for the G26 Mesh Validation Tool.
-    #define MESH_TEST_HOTEND_TEMP   205.0   // (°C) Default nozzle temperature for the G26 Mesh Validation Tool.
-    #define MESH_TEST_BED_TEMP       60.0   // (°C) Default bed temperature for the G26 Mesh Validation Tool.
-  #endif
-
-=======
->>>>>>> .merge_file_a14660
   #define UBL_MESH_EDIT_MOVES_Z     // Sophisticated users prefer no movement of nozzle
   #define UBL_SAVE_ACTIVE_ON_M500   // Save the currently active mesh in the current slot on M500
 
@@ -1603,7 +1586,7 @@
 //
 // Note: Usually sold with a white PCB.
 //
-#define REPRAP_DISCOUNT_SMART_CONTROLLER
+//#define REPRAP_DISCOUNT_SMART_CONTROLLER
 
 //
 // GADGETS3D G3D LCD/SD Controller
@@ -1761,7 +1744,7 @@
 //#define CR10_STOCKDISPLAY
 
 //
-// MKS OLED 1.3" 128 × 64 FULL GRAPHICS CONTROLLER
+// MKS OLED 1.3" 128 Ã 64 FULL GRAPHICS CONTROLLER
 // http://reprap.org/wiki/MKS_12864OLED
 //
 // Tiny, but very sharp OLED display
@@ -1874,7 +1857,7 @@
  *  - Change to green once print has finished
  *  - Turn off after the print has finished and the user has pushed a button
  */
-#if ENABLED(BLINKM) || ENABLED(RGB_LED) || ENABLED(RGBW_LED) || ENABLED(PCA9632) || ENABLED(NEOPIXEL_RGBW_LED)
+#if ENABLED(BLINKM) || ENABLED(RGB_LED) || ENABLED(RGBW_LED) || ENABLED(PCA9632) || ENABLED(NEOPIXEL_LED)
   #define PRINTER_EVENT_LEDS
 #endif
 
@@ -1890,7 +1873,7 @@
  * Set this manually if there are extra servos needing manual control.
  * Leave undefined or set to 0 to entirely disable the servo subsystem.
  */
-#define NUM_SERVOS 1 // Servo index starts with 0 for M280 command
+#define NUM_SERVOS 3 // Servo index starts with 0 for M280 command
 
 // Delay (in milliseconds) before the next move will start, to give the servo time to reach its target angle.
 // 300ms is a good value but you can try less delay.
@@ -1902,38 +1885,5 @@
 // With this option servos are powered only during movement, then turned off to prevent jitter.
 //#define DEACTIVATE_SERVOS_AFTER_MOVE
 
-/**
- * Filament Width Sensor
- *
- * Measures the filament width in real-time and adjusts
- * flow rate to compensate for any irregularities.
- *
- * Also allows the measured filament diameter to set the
- * extrusion rate, so the slicer only has to specify the
- * volume.
- *
- * Only a single extruder is supported at this time.
- *
- *  34 RAMPS_14    : Analog input 5 on the AUX2 connector
- *  81 PRINTRBOARD : Analog input 2 on the Exp1 connector (version B,C,D,E)
- * 301 RAMBO       : Analog input 3
- *
- * Note: May require analog pins to be defined for other boards.
- */
-//#define FILAMENT_WIDTH_SENSOR
-
-#if ENABLED(FILAMENT_WIDTH_SENSOR)
-  #define FILAMENT_SENSOR_EXTRUDER_NUM 0    // Index of the extruder that has the filament sensor (0,1,2,3)
-  #define MEASUREMENT_DELAY_CM        14    // (cm) The distance from the filament sensor to the melting chamber
-
-  #define MEASURED_UPPER_LIMIT         3.30 // (mm) Upper limit used to validate sensor reading
-  #define MEASURED_LOWER_LIMIT         1.90 // (mm) Lower limit used to validate sensor reading
-  #define MAX_MEASUREMENT_DELAY       20    // (bytes) Buffer size for stored measurements (1 byte per cm). Must be larger than MEASUREMENT_DELAY_CM.
-
-  #define DEFAULT_MEASURED_FILAMENT_DIA DEFAULT_NOMINAL_FILAMENT_DIA // Set measured to nominal initially
-
-  // Display filament width on the LCD status line. Status messages will expire after 5 seconds.
-  //#define FILAMENT_LCD_DISPLAY
-#endif
-
 #endif // CONFIGURATION_H
+
