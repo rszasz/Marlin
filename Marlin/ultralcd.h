@@ -23,9 +23,18 @@
 #ifndef ULTRALCD_H
 #define ULTRALCD_H
 
-#include "Marlin.h"
+#include "MarlinConfig.h"
 
 #if ENABLED(ULTRA_LCD)
+
+  #include "Marlin.h"
+
+  #if ENABLED(AUTO_BED_LEVELING_UBL) || ENABLED(G26_MESH_VALIDATION)
+    extern bool lcd_external_control;
+    #if ENABLED(G26_MESH_VALIDATION)
+      void lcd_chirp();
+    #endif
+  #endif
 
   #define BUTTON_EXISTS(BN) (defined(BTN_## BN) && BTN_## BN >= 0)
   #define BUTTON_PRESSED(BN) !READ(BTN_## BN)
@@ -50,7 +59,7 @@
   inline void lcd_refresh() { lcdDrawUpdate = LCDVIEW_CLEAR_CALL_REDRAW; }
 
   #if HAS_BUZZER
-    void lcd_buzz(long duration, uint16_t freq);
+    void lcd_buzz(const long duration, const uint16_t freq);
   #endif
 
   #if ENABLED(LCD_PROGRESS_BAR) && PROGRESS_MSG_EXPIRE > 0
@@ -167,6 +176,11 @@
     #define LCD_CLICKED false
   #endif
 
+  #if ENABLED(AUTO_BED_LEVELING_UBL) || ENABLED(G26_MESH_VALIDATION)
+    bool is_lcd_clicked();
+    void wait_for_release();
+  #endif
+
   #if ENABLED(LCD_SET_PROGRESS_MANUALLY) && (ENABLED(LCD_PROGRESS_BAR) || ENABLED(DOGLCD))
     extern uint8_t progress_bar_percent;
   #endif
@@ -193,8 +207,7 @@
 void lcd_reset_status();
 
 #if ENABLED(AUTO_BED_LEVELING_UBL)
-  extern bool ubl_lcd_map_control;
-  void lcd_mesh_edit_setup(float initial);
+  void lcd_mesh_edit_setup(const float initial);
   float lcd_mesh_edit();
   void lcd_z_offset_edit_setup(float);
   float lcd_z_offset_edit();
