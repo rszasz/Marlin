@@ -136,6 +136,9 @@
 // :[1, 2, 3, 4, 5]
 #define EXTRUDERS 1
 
+// Generally expected filament diameter (1.75, 2.85, 3.0, ...). Used for Volumetric, Filament Width Sensor, etc.
+#define DEFAULT_NOMINAL_FILAMENT_DIA 3.0
+
 // For Cyclops or any "multi-extruder" that shares a single nozzle.
 //#define SINGLENOZZLE
 
@@ -506,7 +509,7 @@
   #define DELTA_PRINTABLE_RADIUS 90.0 // mm
 
   // Center-to-center distance of the holes in the diagonal push rods.
-  #define DELTA_DIAGONAL_ROD 242.0 // mm
+  #define DELTA_DIAGONAL_ROD 228.28 // mm
 
   // height from z=0 to home position
   #define DELTA_HEIGHT 323.25 // get this value from auto calibrate
@@ -1076,7 +1079,17 @@
   #define UBL_PROBE_PT_3_X _PX(DELTA_PROBEABLE_RADIUS, 240)
   #define UBL_PROBE_PT_3_Y _PY(DELTA_PROBEABLE_RADIUS, 240)
 
+<<<<<<< HEAD
   #define UBL_G26_MESH_VALIDATION   // Enable G26 mesh validation
+=======
+  //#define UBL_G26_MESH_VALIDATION // Enable G26 mesh validation
+  #if ENABLED(UBL_G26_MESH_VALIDATION)
+    #define MESH_TEST_NOZZLE_SIZE     0.4   // (mm) Diameter of primary nozzle.
+    #define MESH_TEST_LAYER_HEIGHT    0.2   // (mm) Default layer height for the G26 Mesh Validation Tool.
+    #define MESH_TEST_HOTEND_TEMP   205.0   // (°C) Default nozzle temperature for the G26 Mesh Validation Tool.
+    #define MESH_TEST_BED_TEMP       60.0   // (°C) Default bed temperature for the G26 Mesh Validation Tool.
+  #endif
+>>>>>>> MarlinFirmware/bugfix-1.1.x
   #define UBL_MESH_EDIT_MOVES_Z     // Sophisticated users prefer no movement of nozzle
   #define UBL_SAVE_ACTIVE_ON_M500   // Save the currently active mesh in the current slot on M500
 
@@ -1810,6 +1823,7 @@
 // With this option servos are powered only during movement, then turned off to prevent jitter.
 //#define DEACTIVATE_SERVOS_AFTER_MOVE
 
+<<<<<<< HEAD
 /**
  * Filament Width Sensor
  *
@@ -1846,4 +1860,6 @@
   //#define FILAMENT_LCD_DISPLAY
 #endif
 
+=======
+>>>>>>> MarlinFirmware/bugfix-1.1.x
 #endif // CONFIGURATION_H
