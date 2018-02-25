@@ -37,7 +37,7 @@
  */
 #ifndef CONFIGURATION_H
 #define CONFIGURATION_H
-#define CONFIGURATION_H_VERSION 010108
+#define CONFIGURATION_H_VERSION 010110
 
 //===========================================================================
 //============================= Getting Started =============================
@@ -772,8 +772,8 @@
  *      O-- FRONT --+
  *    (0,0)
  */
-#define X_PROBE_OFFSET_FROM_EXTRUDER -32     // X offset: -left  +right  [of the nozzle]
-#define Y_PROBE_OFFSET_FROM_EXTRUDER 17   // Y offset: -front +behind [the nozzle]
+#define X_PROBE_OFFSET_FROM_EXTRUDER -10     // X offset: -left  +right  [of the nozzle]
+#define Y_PROBE_OFFSET_FROM_EXTRUDER 10   // Y offset: -front +behind [the nozzle]
 #define Z_PROBE_OFFSET_FROM_EXTRUDER -1.45  // Z offset: -below +above  [the nozzle]
 
 // X and Y axis travel speed (mm/m) between probes
@@ -1010,10 +1010,10 @@
   #define MIN_PROBE_EDGE 10
 
   // Set the boundaries for probing (where the probe can reach).
-  #define LEFT_PROBE_BED_POSITION -(DELTA_PROBEABLE_RADIUS)
-  #define RIGHT_PROBE_BED_POSITION DELTA_PROBEABLE_RADIUS
-  #define FRONT_PROBE_BED_POSITION -(DELTA_PROBEABLE_RADIUS)
-  #define BACK_PROBE_BED_POSITION DELTA_PROBEABLE_RADIUS
+  #define LEFT_PROBE_BED_POSITION -(DELTA_PROBEABLE_RADIUS-30)
+  #define RIGHT_PROBE_BED_POSITION DELTA_PROBEABLE_RADIUS-30
+  #define FRONT_PROBE_BED_POSITION -(DELTA_PROBEABLE_RADIUS-30)
+  #define BACK_PROBE_BED_POSITION DELTA_PROBEABLE_RADIUS-30
 
   // Probe along the Y axis, advancing X after each column
   //#define PROBE_Y_FIRST
@@ -1041,10 +1041,10 @@
   // 3 arbitrary points to probe.
   // A simple cross-product is used to estimate the plane of the bed.
   #define ABL_PROBE_PT_1_X 15
-  #define ABL_PROBE_PT_1_Y 180
+  #define ABL_PROBE_PT_1_Y 60
   #define ABL_PROBE_PT_2_X 15
   #define ABL_PROBE_PT_2_Y 20
-  #define ABL_PROBE_PT_3_X 170
+  #define ABL_PROBE_PT_3_X 60
   #define ABL_PROBE_PT_3_Y 20
 
 #elif ENABLED(AUTO_BED_LEVELING_UBL)
@@ -1873,7 +1873,7 @@
 // Delay (in milliseconds) before the next move will start, to give the servo time to reach its target angle.
 // 300ms is a good value but you can try less delay.
 // If the servo can't reach the requested position, increase it.
-#define SERVO_DELAY { 300 }
+#define SERVO_DELAY { 300 , 300 , 300 }
 
 // Servo deactivation
 //

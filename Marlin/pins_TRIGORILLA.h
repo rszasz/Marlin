@@ -33,6 +33,8 @@
 
 #define IS_RAMPS_EFB
 
+#include "pins_RAMPS_13.h"
+
 #define LARGE_FLASH true
 
 #define RAMPS_D2_PIN	2
@@ -44,6 +46,7 @@
 #define RAMPS_D44_PIN	44
 #define RAMPS_D45_PIN	45
 
+#undef SERVO0_PIN
 #define SERVO0_PIN RAMPS_D11_PIN
 
 #define X_MAX_PIN RAMPS_D2_PIN
@@ -51,6 +54,10 @@
 
 // Temperature Sensors
 //
+#undef TEMP_0_PIN 
+#undef TEMP_1_PIN
+#undef TEMP_2_PIN
+#undef TEMP_3_PIN
 #define TEMP_0_PIN         13   // Analog Input
 #define TEMP_1_PIN         14   // Analog Input
 #define TEMP_2_PIN		   15   // Analog Input
@@ -87,4 +94,3 @@
 #undef E1_ENABLE_PIN
 #undef E1_CS_PIN
 
-#include "pins_RAMPS_13.h"
