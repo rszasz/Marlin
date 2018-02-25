@@ -20,15 +20,10 @@
  *
  */
 
-/**
- * Creality Ender pin assignments
- *
- * Applies to the following boards:
- *
- *  Creality Ender-2
- *  Creality Ender-4
- */
+#if HOTENDS > 1 || E_STEPPERS > 1
+  #error "Ender-4 supports only 1 hotend / E-stepper. Comment out this line to continue."
+#endif
 
-#define BOARD_NAME "Creality Ender"
+#define BOARD_NAME "Ender-4"
 
-#include "pins_SANGUINOLOLU_12.h"
+#include "pins_RAMPS.h"

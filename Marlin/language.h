@@ -58,6 +58,7 @@
 // el-gr      Greek (Greece)
 // en         English
 // es         Spanish
+// es_utf8    Spanish (UTF8)
 // eu         Basque-Euskera
 // fi         Finnish
 // fr         French
@@ -213,8 +214,6 @@
 #define MSG_FILAMENT_CHANGE_INSERT_LCD      "Insert filament and press button"
 #define MSG_FILAMENT_CHANGE_HEAT_M108       "Send M108 to heat nozzle"
 #define MSG_FILAMENT_CHANGE_INSERT_M108     "Insert filament and send M108"
-
-#define MSG_SERIAL_ERROR_MENU_STRUCTURE     "Error in menu structure"
 
 #define MSG_ERR_EEPROM_WRITE                "Error writing to EEPROM!"
 

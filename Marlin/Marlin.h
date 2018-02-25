@@ -29,7 +29,6 @@
 #include <inttypes.h>
 
 #include <util/delay.h>
-#include <avr/pgmspace.h>
 #include <avr/eeprom.h>
 #include <avr/interrupt.h>
 
@@ -226,10 +225,6 @@ void clear_command_queue();
 extern millis_t previous_cmd_ms;
 inline void refresh_cmd_timeout() { previous_cmd_ms = millis(); }
 
-#if ENABLED(FAST_PWM_FAN)
-  void setPwmFrequency(uint8_t pin, int val);
-#endif
-
 /**
  * Feedrate scaling and conversion
  */
@@ -249,7 +244,9 @@ extern volatile bool wait_for_heatup;
 
 extern float current_position[XYZE], destination[XYZE];
 
-// Workspace offsets
+/**
+ * Workspace offsets
+ */
 #if HAS_WORKSPACE_OFFSET
   #if HAS_HOME_OFFSET
     extern float home_offset[XYZ];
@@ -257,36 +254,26 @@ extern float current_position[XYZE], destination[XYZE];
   #if HAS_POSITION_SHIFT
     extern float position_shift[XYZ];
   #endif
-#endif
-
-#if HAS_HOME_OFFSET && HAS_POSITION_SHIFT
-  extern float workspace_offset[XYZ];
-  #define WORKSPACE_OFFSET(AXIS) workspace_offset[AXIS]
-#elif HAS_HOME_OFFSET
-  #define WORKSPACE_OFFSET(AXIS) home_offset[AXIS]
-#elif HAS_POSITION_SHIFT
-  #define WORKSPACE_OFFSET(AXIS) position_shift[AXIS]
+  #if HAS_HOME_OFFSET && HAS_POSITION_SHIFT
+    extern float workspace_offset[XYZ];
+    #define WORKSPACE_OFFSET(AXIS) workspace_offset[AXIS]
+  #elif HAS_HOME_OFFSET
+    #define WORKSPACE_OFFSET(AXIS) home_offset[AXIS]
+  #elif HAS_POSITION_SHIFT
+    #define WORKSPACE_OFFSET(AXIS) position_shift[AXIS]
+  #endif
+  #define NATIVE_TO_LOGICAL(POS, AXIS) ((POS) + WORKSPACE_OFFSET(AXIS))
+  #define LOGICAL_TO_NATIVE(POS, AXIS) ((POS) - WORKSPACE_OFFSET(AXIS))
 #else
-  #define WORKSPACE_OFFSET(AXIS) 0
+  #define NATIVE_TO_LOGICAL(POS, AXIS) (POS)
+  #define LOGICAL_TO_NATIVE(POS, AXIS) (POS)
 #endif
-
-#define NATIVE_TO_LOGICAL(POS, AXIS) ((POS) + WORKSPACE_OFFSET(AXIS))
-#define LOGICAL_TO_NATIVE(POS, AXIS) ((POS) - WORKSPACE_OFFSET(AXIS))
-
-#if HAS_POSITION_SHIFT || DISABLED(DELTA)
-  #define LOGICAL_X_POSITION(POS)   NATIVE_TO_LOGICAL(POS, X_AXIS)
-  #define LOGICAL_Y_POSITION(POS)   NATIVE_TO_LOGICAL(POS, Y_AXIS)
-  #define RAW_X_POSITION(POS)       LOGICAL_TO_NATIVE(POS, X_AXIS)
-  #define RAW_Y_POSITION(POS)       LOGICAL_TO_NATIVE(POS, Y_AXIS)
-#else
-  #define LOGICAL_X_POSITION(POS)   (POS)
-  #define LOGICAL_Y_POSITION(POS)   (POS)
-  #define RAW_X_POSITION(POS)       (POS)
-  #define RAW_Y_POSITION(POS)       (POS)
-#endif
-
-#define LOGICAL_Z_POSITION(POS)     NATIVE_TO_LOGICAL(POS, Z_AXIS)
-#define RAW_Z_POSITION(POS)         LOGICAL_TO_NATIVE(POS, Z_AXIS)
+#define LOGICAL_X_POSITION(POS) NATIVE_TO_LOGICAL(POS, X_AXIS)
+#define LOGICAL_Y_POSITION(POS) NATIVE_TO_LOGICAL(POS, Y_AXIS)
+#define LOGICAL_Z_POSITION(POS) NATIVE_TO_LOGICAL(POS, Z_AXIS)
+#define RAW_X_POSITION(POS)     LOGICAL_TO_NATIVE(POS, X_AXIS)
+#define RAW_Y_POSITION(POS)     LOGICAL_TO_NATIVE(POS, Y_AXIS)
+#define RAW_Z_POSITION(POS)     LOGICAL_TO_NATIVE(POS, Z_AXIS)
 
 // Hotend Offsets
 #if HOTENDS > 1
@@ -417,6 +404,7 @@ void report_current_position();
 
 #if HAS_BED_PROBE
   extern float zprobe_zoffset;
+  bool set_probe_deployed(const bool deploy);
   #define DEPLOY_PROBE() set_probe_deployed(true)
   #define STOW_PROBE() set_probe_deployed(false)
 #else
@@ -443,6 +431,10 @@ void report_current_position();
   #endif
 #endif
 
+#if ENABLED(USE_CONTROLLER_FAN)
+  extern int controllerFanSpeed;
+#endif
+
 #if ENABLED(BARICUDA)
   extern uint8_t baricuda_valve_pressure, baricuda_e_to_p_pressure;
 #endif
@@ -457,6 +449,7 @@ void report_current_position();
 #endif
 
 #if ENABLED(ADVANCED_PAUSE_FEATURE)
+  extern int8_t did_pause_print;
   extern AdvancedPauseMenuResponse advanced_pause_menu_response;
   extern float filament_change_unload_length[EXTRUDERS],
                filament_change_load_length[EXTRUDERS];

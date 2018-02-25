@@ -91,7 +91,7 @@
       #if ENABLED(NEWPANEL)
         static void move_z_with_encoder(const float &multiplier);
         static float measure_point_with_encoder();
-        static float measure_business_card_thickness(const float);
+        static float measure_business_card_thickness(float in_height);
         static void manually_probe_remaining_mesh(const float&, const float&, const float&, const float&, const bool) _O0;
         static void fine_tune_mesh(const float &rx, const float &ry, const bool do_ubl_mesh_map) _O0;
       #endif
@@ -222,7 +222,14 @@
               SERIAL_EOL();
             }
           #endif
-          return NAN;
+          // The requested location is off the mesh. Return UBL_Z_RAISE_WHEN_OFF_MESH or NAN.
+          return (
+            #ifdef UBL_Z_RAISE_WHEN_OFF_MESH
+              UBL_Z_RAISE_WHEN_OFF_MESH
+            #else
+              NAN
+            #endif
+          );
         }
 
         const float xratio = (rx0 - mesh_index_to_xpos(x1_i)) * (1.0 / (MESH_X_DIST)),
@@ -248,7 +255,14 @@
               SERIAL_EOL();
             }
           #endif
-          return NAN;
+           // The requested location is off the mesh. Return UBL_Z_RAISE_WHEN_OFF_MESH or NAN.
+          return (
+            #ifdef UBL_Z_RAISE_WHEN_OFF_MESH
+              UBL_Z_RAISE_WHEN_OFF_MESH
+            #else
+              NAN
+            #endif
+          );
         }
 
         const float yratio = (ry0 - mesh_index_to_ypos(y1_i)) * (1.0 / (MESH_Y_DIST)),
@@ -268,6 +282,15 @@
       static float get_z_correction(const float &rx0, const float &ry0) {
         const int8_t cx = get_cell_index_x(rx0),
                      cy = get_cell_index_y(ry0); // return values are clamped
+
+       /**
+         * Check if the requested location is off the mesh.  If so, and
+         * UBL_Z_RAISE_WHEN_OFF_MESH is specified, that value is returned.
+         */
+        #ifdef UBL_Z_RAISE_WHEN_OFF_MESH
+          if (!WITHIN(rx0, MESH_MIN_X, MESH_MAX_X) || !WITHIN(ry0, MESH_MIN_Y, MESH_MAX_Y))
+            return UBL_Z_RAISE_WHEN_OFF_MESH;
+        #endif
 
         const float z1 = calc_z0(rx0,
                                  mesh_index_to_xpos(cx), z_values[cx][cy],

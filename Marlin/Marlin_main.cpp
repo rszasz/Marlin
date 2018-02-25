@@ -25,7 +25,7 @@
  *
  * This firmware is a mashup between Sprinter and grbl.
  *  - https://github.com/kliment/Sprinter
- *  - https://github.com/simen/grbl/tree
+ *  - https://github.com/grbl/grbl
  */
 
 /**
@@ -101,7 +101,7 @@
  * M34  - Set SD Card sorting options. (Requires SDCARD_SORT_ALPHA)
  * M42  - Change pin status via gcode: M42 P<pin> S<value>. LED pin assumed if P is omitted.
  * M43  - Display pin status, watch pins for changes, watch endstops & toggle LED, Z servo probe test, toggle pins
- * M48  - Measure Z Probe repeatability: M48 P<points> X<pos> Y<pos> V<level> E<engage> L<legs>. (Requires Z_MIN_PROBE_REPEATABILITY_TEST)
+ * M48  - Measure Z Probe repeatability: M48 P<points> X<pos> Y<pos> V<level> E<engage> L<legs> S<chizoid>. (Requires Z_MIN_PROBE_REPEATABILITY_TEST)
  * M75  - Start the print job timer.
  * M76  - Pause the print job timer.
  * M77  - Stop the print job timer.
@@ -264,6 +264,10 @@
 #include "types.h"
 #include "gcode.h"
 
+#if ENABLED(AUTO_POWER_CONTROL)
+  #include "power.h"
+#endif
+
 #if HAS_ABL
   #include "vector_3.h"
   #if ENABLED(AUTO_BED_LEVELING_LINEAR)
@@ -350,8 +354,6 @@
 
 #if ENABLED(AUTO_BED_LEVELING_UBL)
   #include "ubl.h"
-  extern bool defer_return_to_status;
-  unified_bed_leveling ubl;
 #endif
 
 #if ENABLED(CNC_COORDINATE_SYSTEMS)
@@ -485,6 +487,10 @@ float soft_endstop_min[XYZ] = { X_MIN_BED, Y_MIN_BED, Z_MIN_POS },
   #endif
 #endif
 
+#if ENABLED(USE_CONTROLLER_FAN)
+  int controllerFanSpeed = 0;
+#endif
+
 // The active extruder (tool). Set with T<extruder> command.
 uint8_t active_extruder = 0;
 
@@ -514,6 +520,15 @@ static millis_t stepper_inactive_time = (DEFAULT_STEPPER_DEACTIVE_TIME) * 1000UL
   PrintCounter print_job_timer = PrintCounter();
 #else
   Stopwatch print_job_timer = Stopwatch();
+#endif
+
+// Auto Power Control
+#if ENABLED(AUTO_POWER_CONTROL)
+  #define PSU_ON()  powerManager.power_on()
+  #define PSU_OFF() powerManager.power_off()
+#else
+  #define PSU_ON()  OUT_WRITE(PS_ON_PIN, PS_ON_AWAKE)
+  #define PSU_OFF() OUT_WRITE(PS_ON_PIN, PS_ON_ASLEEP)
 #endif
 
 // Buzzer - I2C on the LCD or a BEEPER_PIN
@@ -698,8 +713,6 @@ static bool send_ok[BUFSIZE];
 
 #if ENABLED(I2C_POSITION_ENCODERS)
   I2CPositionEncodersMgr I2CPEM;
-  uint8_t blockBufferIndexRef = 0;
-  millis_t lastUpdateMillis;
 #endif
 
 #if ENABLED(CNC_WORKSPACE_PLANES)
@@ -911,15 +924,30 @@ void setup_killpin() {
 
 #if ENABLED(FILAMENT_RUNOUT_SENSOR)
 
-  void setup_filrunoutpin() {
-    #if ENABLED(ENDSTOPPULLUP_FIL_RUNOUT)
-      SET_INPUT_PULLUP(FIL_RUNOUT_PIN);
+  void setup_filament_runout_pins() {
+
+    #if ENABLED(FIL_RUNOUT_PULLUP)
+      #define INIT_RUNOUT_PIN(P) SET_INPUT_PULLUP(P)
     #else
-      SET_INPUT(FIL_RUNOUT_PIN);
+      #define INIT_RUNOUT_PIN(P) SET_INPUT(P)
+    #endif
+
+    INIT_RUNOUT_PIN(FIL_RUNOUT_PIN);
+    #if NUM_RUNOUT_SENSORS > 1
+      INIT_RUNOUT_PIN(FIL_RUNOUT2_PIN);
+      #if NUM_RUNOUT_SENSORS > 2
+        INIT_RUNOUT_PIN(FIL_RUNOUT3_PIN);
+        #if NUM_RUNOUT_SENSORS > 3
+          INIT_RUNOUT_PIN(FIL_RUNOUT4_PIN);
+          #if NUM_RUNOUT_SENSORS > 4
+            INIT_RUNOUT_PIN(FIL_RUNOUT5_PIN);
+          #endif
+        #endif
+      #endif
     #endif
   }
 
-#endif
+#endif // FILAMENT_RUNOUT_SENSOR
 
 void setup_powerhold() {
   #if HAS_SUICIDE
@@ -927,9 +955,9 @@ void setup_powerhold() {
   #endif
   #if HAS_POWER_SWITCH
     #if ENABLED(PS_DEFAULT_OFF)
-      OUT_WRITE(PS_ON_PIN, PS_ON_ASLEEP);
+      PSU_OFF();
     #else
-      OUT_WRITE(PS_ON_PIN, PS_ON_AWAKE);
+      PSU_ON();
     #endif
   #endif
 }
@@ -1014,10 +1042,10 @@ inline void get_serial_commands() {
 
   // If the command buffer is empty for too long,
   // send "wait" to indicate Marlin is still waiting.
-  #if defined(NO_TIMEOUTS) && NO_TIMEOUTS > 0
+  #if NO_TIMEOUTS > 0
     static millis_t last_command_time = 0;
     const millis_t ms = millis();
-    if (commands_in_queue == 0 && !MYSERIAL.available() && ELAPSED(ms, last_command_time + NO_TIMEOUTS)) {
+    if (commands_in_queue == 0 && !MYSERIAL0.available() && ELAPSED(ms, last_command_time + NO_TIMEOUTS)) {
       SERIAL_ECHOLNPGM(MSG_WAIT);
       last_command_time = ms;
     }
@@ -1027,7 +1055,7 @@ inline void get_serial_commands() {
    * Loop while serial characters are incoming and the queue is not full
    */
   int c;
-  while (commands_in_queue < BUFSIZE && (c = MYSERIAL.read()) >= 0) {
+  while (commands_in_queue < BUFSIZE && (c = MYSERIAL0.read()) >= 0) {
 
     char serial_char = c;
 
@@ -1038,7 +1066,8 @@ inline void get_serial_commands() {
 
       serial_comment_mode = false;                      // end of line == end of comment
 
-      if (!serial_count) continue;                      // Skip empty lines
+      // Skip empty lines and comments
+      if (!serial_count) { thermalManager.manage_heater(); continue; }
 
       serial_line_buffer[serial_count] = 0;             // Terminate string
       serial_count = 0;                                 // Reset buffer
@@ -1099,15 +1128,15 @@ inline void get_serial_commands() {
       }
 
       #if DISABLED(EMERGENCY_PARSER)
-        // If command was e-stop process now
+        // Process critical commands early
         if (strcmp(command, "M108") == 0) {
           wait_for_heatup = false;
-          #if ENABLED(ULTIPANEL)
+          #if ENABLED(NEWPANEL)
             wait_for_user = false;
           #endif
         }
         if (strcmp(command, "M112") == 0) kill(PSTR(MSG_KILLED));
-        if (strcmp(command, "M410") == 0) { quickstop_stepper(); }
+        if (strcmp(command, "M410") == 0) quickstop_stepper();
       #endif
 
       #if defined(NO_TIMEOUTS) && NO_TIMEOUTS > 0
@@ -1121,12 +1150,9 @@ inline void get_serial_commands() {
       // Keep fetching, but ignore normal characters beyond the max length
       // The command will be injected when EOL is reached
     }
-    else if (serial_char == '\\') {  // Handle escapes
-      if ((c = MYSERIAL.read()) >= 0) {
-        // if we have one more character, copy it over
-        serial_char = c;
-        if (!serial_comment_mode) serial_line_buffer[serial_count++] = serial_char;
-      }
+    else if (serial_char == '\\') {   // Handle escapes
+      if ((c = MYSERIAL0.read()) >= 0 && !serial_comment_mode) // if we have one more character, copy it over
+        serial_line_buffer[serial_count++] = (char)c;
       // otherwise do nothing
     }
     else { // it's not a newline, carriage return or escape char
@@ -1198,7 +1224,8 @@ inline void get_serial_commands() {
 
         sd_comment_mode = false; // for new command
 
-        if (!sd_count) continue; // skip empty lines (and comment lines)
+        // Skip empty lines and comments
+        if (!sd_count) { thermalManager.manage_heater(); continue; }
 
         command_queue[cmd_queue_index_w][sd_count] = '\0'; // terminate string
         sd_count = 0; // clear sd line buffer
@@ -2069,7 +2096,7 @@ static void clean_up_after_endstop_or_probe_move() {
   #endif // BLTOUCH
 
   // returns false for ok and true for failure
-  bool set_probe_deployed(bool deploy) {
+  bool set_probe_deployed(const bool deploy) {
 
     #if ENABLED(DEBUG_LEVELING_FEATURE)
       if (DEBUGGING(LEVELING)) {
@@ -2080,8 +2107,15 @@ static void clean_up_after_endstop_or_probe_move() {
 
     if (endstops.z_probe_enabled == deploy) return false;
 
-    // Make room for probe
-    do_probe_raise(_Z_CLEARANCE_DEPLOY_PROBE);
+    // Make room for probe to deploy (or stow)
+    // Fix-mounted probe should only raise for deploy
+    if (
+      #if ENABLED(FIX_MOUNTED_PROBE)
+        deploy
+      #else
+        true
+      #endif
+    ) do_probe_raise(max(Z_CLEARANCE_BETWEEN_PROBES, Z_CLEARANCE_DEPLOY_PROBE));
 
     #if ENABLED(Z_PROBE_SLED) || ENABLED(Z_PROBE_ALLEN_KEY)
       #if ENABLED(Z_PROBE_SLED)
@@ -2842,6 +2876,19 @@ static void do_homing_move(const AxisEnum axis, const float distance, const floa
     if (axis == Z_AXIS) probing_pause(true);
   #endif
 
+  // Disable stealthChop if used. Enable diag1 pin on driver.
+  #if ENABLED(SENSORLESS_HOMING)
+    #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
+      if (axis == X_AXIS) tmc_sensorless_homing(stepperX);
+    #endif
+    #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
+      if (axis == Y_AXIS) tmc_sensorless_homing(stepperY);
+    #endif
+    #if ENABLED(Z_IS_TMC2130) && defined(Z_HOMING_SENSITIVITY)
+      if (axis == Z_AXIS) tmc_sensorless_homing(stepperZ);
+    #endif
+  #endif
+
   // Tell the planner the axis is at 0
   current_position[axis] = 0;
 
@@ -2867,6 +2914,19 @@ static void do_homing_move(const AxisEnum axis, const float distance, const floa
   #endif
 
   endstops.hit_on_purpose();
+
+  // Re-enable stealthChop if used. Disable diag1 pin on driver.
+  #if ENABLED(SENSORLESS_HOMING)
+    #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
+      if (axis == X_AXIS) tmc_sensorless_homing(stepperX, false);
+    #endif
+    #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
+      if (axis == Y_AXIS) tmc_sensorless_homing(stepperY, false);
+    #endif
+    #if ENABLED(Z_IS_TMC2130) && defined(Z_HOMING_SENSITIVITY)
+      if (axis == Z_AXIS) tmc_sensorless_homing(stepperZ, false);
+    #endif
+  #endif
 
   #if ENABLED(DEBUG_LEVELING_FEATURE)
     if (DEBUGGING(LEVELING)) {
@@ -2929,16 +2989,6 @@ static void homeaxis(const AxisEnum axis) {
   #endif
   #if ENABLED(Z_DUAL_ENDSTOPS)
     if (axis == Z_AXIS) stepper.set_homing_flag_z(true);
-  #endif
-
-  // Disable stealthChop if used. Enable diag1 pin on driver.
-  #if ENABLED(SENSORLESS_HOMING)
-    #if ENABLED(X_IS_TMC2130)
-      if (axis == X_AXIS) tmc_sensorless_homing(stepperX);
-    #endif
-    #if ENABLED(Y_IS_TMC2130)
-      if (axis == Y_AXIS) tmc_sensorless_homing(stepperY);
-    #endif
   #endif
 
   // Fast move towards endstop until triggered
@@ -3039,16 +3089,6 @@ static void homeaxis(const AxisEnum axis) {
       if (DEBUGGING(LEVELING)) DEBUG_POS("> AFTER set_axis_is_at_home", current_position);
     #endif
 
-  #endif
-
-  // Re-enable stealthChop if used. Disable diag1 pin on driver.
-  #if ENABLED(SENSORLESS_HOMING)
-    #if ENABLED(X_IS_TMC2130)
-      if (axis == X_AXIS) tmc_sensorless_homing(stepperX, false);
-    #endif
-    #if ENABLED(Y_IS_TMC2130)
-      if (axis == Y_AXIS) tmc_sensorless_homing(stepperY, false);
-    #endif
   #endif
 
   // Put away the Z probe
@@ -3578,9 +3618,28 @@ inline void gcode_G4() {
                 mlratio = mlx > mly ? mly / mlx : mlx / mly,
                 fr_mm_s = min(homing_feedrate(X_AXIS), homing_feedrate(Y_AXIS)) * SQRT(sq(mlratio) + 1.0);
 
+    #if ENABLED(SENSORLESS_HOMING)
+      #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
+        tmc_sensorless_homing(stepperX);
+      #endif
+      #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
+        tmc_sensorless_homing(stepperY);
+      #endif
+    #endif
+
     do_blocking_move_to_xy(1.5 * mlx * x_axis_home_dir, 1.5 * mly * home_dir(Y_AXIS), fr_mm_s);
     endstops.hit_on_purpose(); // clear endstop hit flags
     current_position[X_AXIS] = current_position[Y_AXIS] = 0.0;
+
+    #if ENABLED(SENSORLESS_HOMING)
+      #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
+        tmc_sensorless_homing(stepperX, false);
+      #endif
+      #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
+        tmc_sensorless_homing(stepperY, false);
+      #endif
+      safe_delay(500); // Short delay needed to settle
+    #endif
   }
 
 #endif // QUICK_HOME
@@ -3742,11 +3801,37 @@ inline void gcode_G4() {
     ZERO(current_position);
     sync_plan_position();
 
+    // Disable stealthChop if used. Enable diag1 pin on driver.
+    #if ENABLED(SENSORLESS_HOMING)
+      #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
+        tmc_sensorless_homing(stepperX);
+      #endif
+      #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
+        tmc_sensorless_homing(stepperY);
+      #endif
+      #if ENABLED(Z_IS_TMC2130) && defined(Z_HOMING_SENSITIVITY)
+        tmc_sensorless_homing(stepperZ);
+      #endif
+    #endif
+
     // Move all carriages together linearly until an endstop is hit.
     current_position[X_AXIS] = current_position[Y_AXIS] = current_position[Z_AXIS] = (delta_height + 10);
     feedrate_mm_s = homing_feedrate(X_AXIS);
     buffer_line_to_current_position();
     stepper.synchronize();
+
+    // Re-enable stealthChop if used. Disable diag1 pin on driver.
+    #if ENABLED(SENSORLESS_HOMING)
+      #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
+        tmc_sensorless_homing(stepperX, false);
+      #endif
+      #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
+        tmc_sensorless_homing(stepperY, false);
+      #endif
+      #if ENABLED(Z_IS_TMC2130) && defined(Z_HOMING_SENSITIVITY)
+        tmc_sensorless_homing(stepperZ, false);
+      #endif
+    #endif
 
     // If an endstop was not hit, then damage can occur if homing is continued.
     // This can occur if the delta height not set correctly.
@@ -3823,6 +3908,10 @@ inline void gcode_G4() {
         active_extruder_parked = false;
       #endif
 
+      #if ENABLED(SENSORLESS_HOMING)
+        safe_delay(500); // Short delay needed to settle
+      #endif
+
       do_blocking_move_to_xy(destination[X_AXIS], destination[Y_AXIS]);
       HOMEAXIS(Z);
     }
@@ -3879,8 +3968,8 @@ inline void gcode_G28(const bool always_home_all) {
 
   // Disable the leveling matrix before homing
   #if HAS_LEVELING
-    #if ENABLED(AUTO_BED_LEVELING_UBL)
-      const bool ubl_state_at_entry = planner.leveling_active;
+    #if ENABLED(RESTORE_LEVELING_AFTER_G28)
+      const bool leveling_state_at_entry = planner.leveling_active;
     #endif
     set_bed_leveling_enabled(false);
   #endif
@@ -3921,12 +4010,7 @@ inline void gcode_G28(const bool always_home_all) {
 
     #if Z_HOME_DIR > 0  // If homing away from BED do Z first
 
-      if (home_all || homeZ) {
-        HOMEAXIS(Z);
-        #if ENABLED(DEBUG_LEVELING_FEATURE)
-          if (DEBUGGING(LEVELING)) DEBUG_POS("> HOMEAXIS(Z)", current_position);
-        #endif
-      }
+      if (home_all || homeZ) HOMEAXIS(Z);
 
     #endif
 
@@ -3950,20 +4034,23 @@ inline void gcode_G28(const bool always_home_all) {
 
     #endif
 
+    // Home Y (before X)
     #if ENABLED(HOME_Y_BEFORE_X)
 
-      // Home Y
-      if (home_all || homeY) {
-        HOMEAXIS(Y);
-        #if ENABLED(DEBUG_LEVELING_FEATURE)
-          if (DEBUGGING(LEVELING)) DEBUG_POS("> homeY", current_position);
+      if (home_all || homeY
+        #if ENABLED(CODEPENDENT_XY_HOMING)
+          || homeX
         #endif
-      }
+      ) HOMEAXIS(Y);
 
     #endif
 
     // Home X
-    if (home_all || homeX) {
+    if (home_all || homeX
+      #if ENABLED(CODEPENDENT_XY_HOMING) && DISABLED(HOME_Y_BEFORE_X)
+        || homeY
+      #endif
+    ) {
 
       #if ENABLED(DUAL_X_CARRIAGE)
 
@@ -3988,20 +4075,11 @@ inline void gcode_G28(const bool always_home_all) {
         HOMEAXIS(X);
 
       #endif
-
-      #if ENABLED(DEBUG_LEVELING_FEATURE)
-        if (DEBUGGING(LEVELING)) DEBUG_POS("> homeX", current_position);
-      #endif
     }
 
+    // Home Y (after X)
     #if DISABLED(HOME_Y_BEFORE_X)
-      // Home Y
-      if (home_all || homeY) {
-        HOMEAXIS(Y);
-        #if ENABLED(DEBUG_LEVELING_FEATURE)
-          if (DEBUGGING(LEVELING)) DEBUG_POS("> homeY", current_position);
-        #endif
-      }
+      if (home_all || homeY) HOMEAXIS(Y);
     #endif
 
     // Home Z last if homing towards the bed
@@ -4011,9 +4089,6 @@ inline void gcode_G28(const bool always_home_all) {
           home_z_safely();
         #else
           HOMEAXIS(Z);
-        #endif
-        #if ENABLED(DEBUG_LEVELING_FEATURE)
-          if (DEBUGGING(LEVELING)) DEBUG_POS("> (home_all || homeZ) > final", current_position);
         #endif
       } // home_all || homeZ
     #endif // Z_HOME_DIR < 0
@@ -4029,8 +4104,8 @@ inline void gcode_G28(const bool always_home_all) {
     do_blocking_move_to_z(delta_clip_start_height);
   #endif
 
-  #if ENABLED(AUTO_BED_LEVELING_UBL)
-    set_bed_leveling_enabled(ubl_state_at_entry);
+  #if ENABLED(RESTORE_LEVELING_AFTER_G28)
+    set_bed_leveling_enabled(leveling_state_at_entry);
   #endif
 
   clean_up_after_endstop_or_probe_move();
@@ -4077,12 +4152,6 @@ void home_all_axes() { gcode_G28(true); }
 #endif
 
 #if ENABLED(MESH_BED_LEVELING) || ENABLED(PROBE_MANUALLY)
-
-  #if ENABLED(LCD_BED_LEVELING)
-    extern bool lcd_wait_for_move;
-  #else
-    constexpr bool lcd_wait_for_move = false;
-  #endif
 
   inline void _manual_goto_xy(const float &rx, const float &ry) {
 
@@ -4568,8 +4637,12 @@ void home_all_axes() { gcode_G28(true); }
         abl_grid_points_y = parser.intval('Y', GRID_MAX_POINTS_Y);
         if (parser.seenval('P')) abl_grid_points_x = abl_grid_points_y = parser.value_int();
 
-        if (abl_grid_points_x < 2 || abl_grid_points_y < 2) {
-          SERIAL_PROTOCOLLNPGM("?Number of probe points is implausible (2 minimum).");
+        if (!WITHIN(abl_grid_points_x, 2, GRID_MAX_POINTS_X)) {
+          SERIAL_PROTOCOLLNPGM("?Probe points (X) is implausible (2-" STRINGIFY(GRID_MAX_POINTS_X) ").");
+          return;
+        }
+        if (!WITHIN(abl_grid_points_y, 2, GRID_MAX_POINTS_Y)) {
+          SERIAL_PROTOCOLLNPGM("?Probe points (Y) is implausible (2-" STRINGIFY(GRID_MAX_POINTS_Y) ").");
           return;
         }
 
@@ -6333,7 +6406,7 @@ inline void gcode_M17() {
   }
 
   static float resume_position[XYZE];
-  static int8_t did_pause_print = 0;
+  int8_t did_pause_print = 0;
 
   #if HAS_BUZZER
     static void filament_change_beep(const int8_t max_beep_count, const bool init=false) {
@@ -6957,10 +7030,10 @@ inline void gcode_M31() {
 /**
  * Sensitive pin test for M42, M226
  */
-static bool pin_is_protected(const int8_t pin) {
-  static const int8_t sensitive_pins[] PROGMEM = SENSITIVE_PINS;
+static bool pin_is_protected(const pin_t pin) {
+  static const pin_t sensitive_pins[] PROGMEM = SENSITIVE_PINS;
   for (uint8_t i = 0; i < COUNT(sensitive_pins); i++)
-    if (pin == (int8_t)pgm_read_byte(&sensitive_pins[i])) return true;
+    if (pin == (pin_t)pgm_read_byte(&sensitive_pins[i])) return true;
   return false;
 }
 
@@ -6974,7 +7047,7 @@ inline void gcode_M42() {
   if (!parser.seenval('S')) return;
   const byte pin_status = parser.value_byte();
 
-  const int pin_number = parser.intval('P', LED_PIN);
+  const pin_t pin_number = parser.byteval('P', LED_PIN);
   if (pin_number < 0) return;
 
   if (pin_is_protected(pin_number)) {
@@ -7231,8 +7304,8 @@ inline void gcode_M42() {
     }
 
     // Get the range of pins to test or watch
-    const uint8_t first_pin = parser.byteval('P'),
-                  last_pin = parser.seenval('P') ? first_pin : NUM_DIGITAL_PINS - 1;
+    const pin_t first_pin = parser.byteval('P'),
+                last_pin = parser.seenval('P') ? first_pin : NUM_DIGITAL_PINS - 1;
 
     if (first_pin > last_pin) return;
 
@@ -7242,7 +7315,7 @@ inline void gcode_M42() {
     if (parser.boolval('W')) {
       SERIAL_PROTOCOLLNPGM("Watching pins");
       byte pin_state[last_pin - first_pin + 1];
-      for (int8_t pin = first_pin; pin <= last_pin; pin++) {
+      for (pin_t pin = first_pin; pin <= last_pin; pin++) {
         if (pin_is_protected(pin) && !ignore_protection) continue;
         pinMode(pin, INPUT_PULLUP);
         delay(1);
@@ -7260,7 +7333,7 @@ inline void gcode_M42() {
       #endif
 
       for (;;) {
-        for (int8_t pin = first_pin; pin <= last_pin; pin++) {
+        for (pin_t pin = first_pin; pin <= last_pin; pin++) {
           if (pin_is_protected(pin) && !ignore_protection) continue;
           const byte val =
             /*
@@ -7288,7 +7361,7 @@ inline void gcode_M42() {
     }
 
     // Report current state of selected pin(s)
-    for (uint8_t pin = first_pin; pin <= last_pin; pin++)
+    for (pin_t pin = first_pin; pin <= last_pin; pin++)
       report_pin_state_extended(pin, ignore_protection, true);
   }
 
@@ -7300,7 +7373,7 @@ inline void gcode_M42() {
    * M48: Z probe repeatability measurement function.
    *
    * Usage:
-   *   M48 <P#> <X#> <Y#> <V#> <E> <L#>
+   *   M48 <P#> <X#> <Y#> <V#> <E> <L#> <S>
    *     P = Number of sampled points (4-50, default 10)
    *     X = Sample X position
    *     Y = Sample Y position
@@ -7636,8 +7709,10 @@ inline void gcode_M104() {
       }
     #endif
 
-    if (parser.value_celsius() > thermalManager.degHotend(target_extruder))
-      lcd_status_printf_P(0, PSTR("E%i %s"), target_extruder + 1, MSG_HEATING);
+    #if ENABLED(ULTRA_LCD)
+      if (parser.value_celsius() > thermalManager.degHotend(target_extruder))
+        lcd_status_printf_P(0, PSTR("E%i %s"), target_extruder + 1, MSG_HEATING);
+    #endif
   }
 
   #if ENABLED(AUTOTEMP)
@@ -7794,7 +7869,10 @@ inline void gcode_M109() {
         print_job_timer.start();
     #endif
 
-    if (thermalManager.isHeatingHotend(target_extruder)) lcd_status_printf_P(0, PSTR("E%i %s"), target_extruder + 1, MSG_HEATING);
+    #if ENABLED(ULTRA_LCD)
+      if (thermalManager.isHeatingHotend(target_extruder))
+        lcd_status_printf_P(0, PSTR("E%i %s"), target_extruder + 1, MSG_HEATING);
+    #endif
   }
   else return;
 
@@ -8206,7 +8284,7 @@ inline void gcode_M140() {
       return;
     }
 
-    OUT_WRITE(PS_ON_PIN, PS_ON_AWAKE); // GND
+    PSU_ON();
 
     /**
      * If you have a switch on suicide pin, this is useful
@@ -8259,7 +8337,7 @@ inline void gcode_M81() {
     stepper.synchronize();
     suicide();
   #elif HAS_POWER_SWITCH
-    OUT_WRITE(PS_ON_PIN, PS_ON_ASLEEP);
+    PSU_OFF();
     powersupply_on = false;
   #endif
 
@@ -8301,7 +8379,7 @@ inline void gcode_M18_M84() {
     }
 
     #if ENABLED(AUTO_BED_LEVELING_UBL) && ENABLED(ULTIPANEL)  // Only needed with an LCD
-      ubl.lcd_map_control = defer_return_to_status = false;
+      if (ubl.lcd_map_control) ubl.lcd_map_control = defer_return_to_status = false;
     #endif
   }
 }
@@ -8784,8 +8862,6 @@ inline void gcode_M203() {
  *    P = Printing moves
  *    R = Retract only (no X, Y, Z) moves
  *    T = Travel (non printing) moves
- *
- *  Also sets minimum segment time in ms (B20000) to prevent buffer under-runs and M20 minimum feedrate
  */
 inline void gcode_M204() {
   if (parser.seen('S')) {  // Kept for legacy compatibility. Should NOT BE USED for new developments.
@@ -9100,16 +9176,16 @@ inline void gcode_M221() {
  */
 inline void gcode_M226() {
   if (parser.seen('P')) {
-    const int pin_number = parser.value_int(),
+    const int pin = parser.value_int(),
               pin_state = parser.intval('S', -1); // required pin state - default is inverted
 
-    if (WITHIN(pin_state, -1, 1) && pin_number > -1 && !pin_is_protected(pin_number)) {
+    if (WITHIN(pin_state, -1, 1) && pin > -1 && !pin_is_protected(pin)) {
 
       int target = LOW;
 
       stepper.synchronize();
 
-      pinMode(pin_number, INPUT);
+      pinMode(pin, INPUT);
       switch (pin_state) {
         case 1:
           target = HIGH;
@@ -9118,13 +9194,13 @@ inline void gcode_M226() {
           target = LOW;
           break;
         case -1:
-          target = !digitalRead(pin_number);
+          target = !digitalRead(pin);
           break;
       }
 
-      while (digitalRead(pin_number) != target) idle();
+      while (digitalRead(pin) != target) idle();
 
-    } // pin_state -1 0 1 && pin_number > -1
+    } // pin_state -1 0 1 && pin > -1
   } // parser.seen('P')
 }
 
@@ -10382,33 +10458,18 @@ inline void gcode_M502() {
 
 #if ENABLED(LIN_ADVANCE)
   /**
-   * M900: Set and/or Get advance K factor and WH/D ratio
+   * M900: Set and/or Get advance K factor
    *
    *  K<factor>                  Set advance K factor
-   *  R<ratio>                   Set ratio directly (overrides WH/D)
-   *  W<width> H<height> D<diam> Set ratio from WH/D
    */
   inline void gcode_M900() {
     stepper.synchronize();
 
     const float newK = parser.floatval('K', -1);
-    if (newK >= 0) planner.extruder_advance_k = newK;
-
-    float newR = parser.floatval('R', -1);
-    if (newR < 0) {
-      const float newD = parser.floatval('D', -1),
-                  newW = parser.floatval('W', -1),
-                  newH = parser.floatval('H', -1);
-      if (newD >= 0 && newW >= 0 && newH >= 0)
-        newR = newD ? (newW * newH) / (sq(newD * 0.5) * M_PI) : 0;
-    }
-    if (newR >= 0) planner.advance_ed_ratio = newR;
+    if (newK >= 0) planner.extruder_advance_K = newK;
 
     SERIAL_ECHO_START();
-    SERIAL_ECHOPAIR("Advance K=", planner.extruder_advance_k);
-    SERIAL_ECHOPGM(" E/D=");
-    const float ratio = planner.advance_ed_ratio;
-    if (ratio) SERIAL_ECHO(ratio); else SERIAL_ECHOPGM("Auto");
+    SERIAL_ECHOPAIR("Advance K=", planner.extruder_advance_K);
     SERIAL_EOL();
   }
 #endif // LIN_ADVANCE
@@ -10569,20 +10630,32 @@ inline void gcode_M502() {
   #if ENABLED(SENSORLESS_HOMING)
     inline void gcode_M914() {
       #define TMC_SET_GET_SGT(P,Q) do { \
-        if (parser.seen(axis_codes[X_AXIS])) tmc_set_sgt(stepperX, extended_axis_codes[TMC_X], parser.value_int()); \
-        else tmc_get_sgt(stepperX, extended_axis_codes[TMC_X]); } while(0)
+        if (parser.seen(axis_codes[P##_AXIS])) tmc_set_sgt(stepper##Q, extended_axis_codes[TMC_##Q], parser.value_int()); \
+        else tmc_get_sgt(stepper##Q, extended_axis_codes[TMC_##Q]); } while(0)
 
-      #if ENABLED(X_IS_TMC2130) || ENABLED(IS_TRAMS)
-        TMC_SET_GET_SGT(X,X);
+      #ifdef X_HOMING_SENSITIVITY
+        #if ENABLED(X_IS_TMC2130) || ENABLED(IS_TRAMS)
+          TMC_SET_GET_SGT(X,X);
+        #endif
+        #if ENABLED(X2_IS_TMC2130)
+          TMC_SET_GET_SGT(X,X2);
+        #endif
       #endif
-      #if ENABLED(X2_IS_TMC2130)
-        TMC_SET_GET_SGT(X,X2);
+      #ifdef Y_HOMING_SENSITIVITY
+        #if ENABLED(Y_IS_TMC2130) || ENABLED(IS_TRAMS)
+          TMC_SET_GET_SGT(Y,Y);
+        #endif
+        #if ENABLED(Y2_IS_TMC2130)
+          TMC_SET_GET_SGT(Y,Y2);
+        #endif
       #endif
-      #if ENABLED(Y_IS_TMC2130) || ENABLED(IS_TRAMS)
-        TMC_SET_GET_SGT(Y,Y);
-      #endif
-      #if ENABLED(Y2_IS_TMC2130)
-        TMC_SET_GET_SGT(Y,Y2);
+      #ifdef Z_HOMING_SENSITIVITY
+        #if ENABLED(Z_IS_TMC2130) || ENABLED(IS_TRAMS)
+          TMC_SET_GET_SGT(Z,Z);
+        #endif
+        #if ENABLED(Z2_IS_TMC2130)
+          TMC_SET_GET_SGT(Z,Z2);
+        #endif
       #endif
     }
   #endif // SENSORLESS_HOMING
@@ -11924,7 +11997,7 @@ void process_next_command() {
  */
 void FlushSerialRequestResend() {
   //char command_queue[cmd_queue_index_r][100]="Resend:";
-  MYSERIAL.flush();
+  SERIAL_FLUSH();
   SERIAL_PROTOCOLPGM(MSG_RESEND);
   SERIAL_PROTOCOLLN(gcode_LastN + 1);
   ok_to_send();
@@ -12895,7 +12968,7 @@ void prepare_move_to_destination() {
       angular_travel = RADIANS(360);
 
     const float flat_mm = radius * angular_travel,
-                mm_of_travel = linear_travel ? HYPOT(flat_mm, linear_travel) : flat_mm;
+                mm_of_travel = linear_travel ? HYPOT(flat_mm, linear_travel) : FABS(flat_mm);
     if (mm_of_travel < 0.001) return;
 
     uint16_t segments = FLOOR(mm_of_travel / (MM_PER_ARC_SEGMENT));
@@ -13068,7 +13141,8 @@ void prepare_move_to_destination() {
       }
 
       // Fan off if no steppers have been enabled for CONTROLLERFAN_SECS seconds
-      uint8_t speed = (!lastMotorOn || ELAPSED(ms, lastMotorOn + (CONTROLLERFAN_SECS) * 1000UL)) ? 0 : CONTROLLERFAN_SPEED;
+      const uint8_t speed = (lastMotorOn && PENDING(ms, lastMotorOn + (CONTROLLERFAN_SECS) * 1000UL)) ? CONTROLLERFAN_SPEED : 0;
+      controllerFanSpeed = speed;
 
       // allows digital or PWM fan output to be used (see M42 handling)
       WRITE(CONTROLLER_FAN_PIN, speed);
@@ -13202,46 +13276,10 @@ void prepare_move_to_destination() {
 
 #endif // FILAMENT_RUNOUT_SENSOR
 
-#if ENABLED(FAST_PWM_FAN)
-
-  void setPwmFrequency(uint8_t pin, int val) {
-    val &= 0x07;
-    switch (digitalPinToTimer(pin)) {
-      #ifdef TCCR0A
-        #if !AVR_AT90USB1286_FAMILY
-          case TIMER0A:
-        #endif
-        case TIMER0B:                           //_SET_CS(0, val);
-                                                  break;
-      #endif
-      #ifdef TCCR1A
-        case TIMER1A: case TIMER1B:             //_SET_CS(1, val);
-                                                  break;
-      #endif
-      #if defined(TCCR2) || defined(TCCR2A)
-        #ifdef TCCR2
-          case TIMER2:
-        #endif
-        #ifdef TCCR2A
-          case TIMER2A: case TIMER2B:
-        #endif
-                                                  _SET_CS(2, val); break;
-      #endif
-      #ifdef TCCR3A
-        case TIMER3A: case TIMER3B: case TIMER3C: _SET_CS(3, val); break;
-      #endif
-      #ifdef TCCR4A
-        case TIMER4A: case TIMER4B: case TIMER4C: _SET_CS(4, val); break;
-      #endif
-      #ifdef TCCR5A
-        case TIMER5A: case TIMER5B: case TIMER5C: _SET_CS(5, val); break;
-      #endif
-    }
-  }
-
-#endif // FAST_PWM_FAN
-
 void enable_all_steppers() {
+  #if ENABLED(AUTO_POWER_CONTROL)
+    powerManager.power_on();
+  #endif
   enable_X();
   enable_Y();
   enable_Z();
@@ -13277,6 +13315,38 @@ void disable_all_steppers() {
   disable_e_steppers();
 }
 
+#if ENABLED(FILAMENT_RUNOUT_SENSOR)
+
+  FORCE_INLINE bool check_filament_runout() {
+
+    if (IS_SD_PRINTING || print_job_timer.isRunning()) {
+
+      #if NUM_RUNOUT_SENSORS < 2
+        // A single sensor applying to all extruders
+        return READ(FIL_RUNOUT_PIN) == FIL_RUNOUT_INVERTING;
+      #else
+        // Read the sensor for the active extruder
+        switch (active_extruder) {
+          case 0: return READ(FIL_RUNOUT_PIN) == FIL_RUNOUT_INVERTING;
+          case 1: return READ(FIL_RUNOUT2_PIN) == FIL_RUNOUT_INVERTING;
+          #if NUM_RUNOUT_SENSORS > 2
+            case 2: return READ(FIL_RUNOUT3_PIN) == FIL_RUNOUT_INVERTING;
+            #if NUM_RUNOUT_SENSORS > 3
+              case 3: return READ(FIL_RUNOUT4_PIN) == FIL_RUNOUT_INVERTING;
+              #if NUM_RUNOUT_SENSORS > 4
+                case 4: return READ(FIL_RUNOUT5_PIN) == FIL_RUNOUT_INVERTING;
+              #endif
+            #endif
+          #endif
+        }
+      #endif
+
+    }
+    return false;
+  }
+
+#endif // FILAMENT_RUNOUT_SENSOR
+
 /**
  * Manage several activities:
  *  - Check for Filament Runout
@@ -13292,11 +13362,7 @@ void disable_all_steppers() {
 void manage_inactivity(bool ignore_stepper_queue/*=false*/) {
 
   #if ENABLED(FILAMENT_RUNOUT_SENSOR)
-    if ((IS_SD_PRINTING || print_job_timer.isRunning())
-       && READ(FIL_RUNOUT_PIN) == FIL_RUNOUT_INVERTING
-       && thermalManager.targetHotEnoughToExtrude(active_extruder)
-    )
-      handle_filament_runout();
+    if (check_filament_runout()) handle_filament_runout();
   #endif
 
   if (commands_in_queue < BUFSIZE) get_available_commands();
@@ -13331,7 +13397,7 @@ void manage_inactivity(bool ignore_stepper_queue/*=false*/) {
       disable_e_steppers();
     #endif
     #if ENABLED(AUTO_BED_LEVELING_UBL) && ENABLED(ULTIPANEL)  // Only needed with an LCD
-      ubl.lcd_map_control = defer_return_to_status = false;
+      if (ubl.lcd_map_control) ubl.lcd_map_control = defer_return_to_status = false;
     #endif
   }
 
@@ -13385,9 +13451,15 @@ void manage_inactivity(bool ignore_stepper_queue/*=false*/) {
     controllerFan(); // Check if fan should be turned on to cool stepper drivers down
   #endif
 
+  #if ENABLED(AUTO_POWER_CONTROL)
+    powerManager.check();
+  #endif
+
   #if ENABLED(EXTRUDER_RUNOUT_PREVENT)
-    if (ELAPSED(ms, previous_cmd_ms + (EXTRUDER_RUNOUT_SECONDS) * 1000UL)
-      && thermalManager.degHotend(active_extruder) > EXTRUDER_RUNOUT_MINTEMP) {
+    if (thermalManager.degHotend(active_extruder) > EXTRUDER_RUNOUT_MINTEMP
+      && ELAPSED(ms, previous_cmd_ms + (EXTRUDER_RUNOUT_SECONDS) * 1000UL)
+      && !planner.blocks_queued()
+    ) {
       #if ENABLED(SWITCHING_EXTRUDER)
         const bool oldstatus = E0_ENABLE_READ;
         enable_E0();
@@ -13498,12 +13570,10 @@ void idle(
   #endif
 
   #if ENABLED(I2C_POSITION_ENCODERS)
-    if (planner.blocks_queued() &&
-        ( (blockBufferIndexRef != planner.block_buffer_head) ||
-          ((lastUpdateMillis + I2CPE_MIN_UPD_TIME_MS) < millis())) ) {
-      blockBufferIndexRef = planner.block_buffer_head;
+    static millis_t i2cpem_next_update_ms;
+    if (planner.blocks_queued() && ELAPSED(millis(), i2cpem_next_update_ms)) {
       I2CPEM.update();
-      lastUpdateMillis = millis();
+      i2cpem_next_update_ms = millis() + I2CPE_MIN_UPD_TIME_MS;
     }
   #endif
 }
@@ -13599,7 +13669,7 @@ void setup() {
   #endif
 
   #if ENABLED(FILAMENT_RUNOUT_SENSOR)
-    setup_filrunoutpin();
+    setup_filament_runout_pins();
   #endif
 
   setup_killpin();
@@ -13610,10 +13680,13 @@ void setup() {
     disableStepperDrivers();
   #endif
 
-  MYSERIAL.begin(BAUDRATE);
+  MYSERIAL0.begin(BAUDRATE);
   SERIAL_PROTOCOLLNPGM("start");
   SERIAL_ECHO_START();
 
+  #if ENABLED(HAVE_TMC2130)
+    tmc_init_cs_pins();
+  #endif
   #if ENABLED(HAVE_TMC2208)
     tmc2208_serial_begin();
   #endif
@@ -13752,6 +13825,7 @@ void setup() {
   #endif
 
   lcd_init();
+  LCD_MESSAGEPGM(WELCOME_MSG);
 
   #if ENABLED(SHOW_BOOTSCREEN)
     lcd_bootscreen();
