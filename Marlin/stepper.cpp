@@ -174,28 +174,28 @@ volatile long Stepper::endstops_trigsteps[XYZ];
 
 #if ENABLED(X_DUAL_STEPPER_DRIVERS)
   #define X_APPLY_DIR(v,Q) do{ X_DIR_WRITE(v); X2_DIR_WRITE((v) != INVERT_X2_VS_X_DIR); }while(0)
-  #if ENABLED(DUAL_X_CARRIAGE)
-    #define X_APPLY_DIR(v,ALWAYS) \
-      if (extruder_duplication_enabled || ALWAYS) { \
-        X_DIR_WRITE(v); \
-        X2_DIR_WRITE(v); \
-      } \
-      else { \
-        if (current_block->active_extruder) X2_DIR_WRITE(v); else X_DIR_WRITE(v); \
-      }
-    #define X_APPLY_STEP(v,ALWAYS) \
-      if (extruder_duplication_enabled || ALWAYS) { \
-        X_STEP_WRITE(v); \
-        X2_STEP_WRITE(v); \
-      } \
-      else { \
-        if (current_block->active_extruder) X2_STEP_WRITE(v); else X_STEP_WRITE(v); \
-      }
-  #elif ENABLED(X_DUAL_ENDSTOPS)
+  #if ENABLED(X_DUAL_ENDSTOPS)
     #define X_APPLY_STEP(v,Q) DUAL_ENDSTOP_APPLY_STEP(X,v)
   #else
     #define X_APPLY_STEP(v,Q) do{ X_STEP_WRITE(v); X2_STEP_WRITE(v); }while(0)
   #endif
+#elif ENABLED(DUAL_X_CARRIAGE)
+  #define X_APPLY_DIR(v,ALWAYS) \
+    if (extruder_duplication_enabled || ALWAYS) { \
+      X_DIR_WRITE(v); \
+      X2_DIR_WRITE(v); \
+    } \
+    else { \
+      if (current_block->active_extruder) X2_DIR_WRITE(v); else X_DIR_WRITE(v); \
+    }
+  #define X_APPLY_STEP(v,ALWAYS) \
+    if (extruder_duplication_enabled || ALWAYS) { \
+      X_STEP_WRITE(v); \
+      X2_STEP_WRITE(v); \
+    } \
+    else { \
+      if (current_block->active_extruder) X2_STEP_WRITE(v); else X_STEP_WRITE(v); \
+    }
 #else
   #define X_APPLY_DIR(v,Q) X_DIR_WRITE(v)
   #define X_APPLY_STEP(v,Q) X_STEP_WRITE(v)
@@ -436,8 +436,8 @@ void Stepper::isr() {
     else {
       planner.discard_current_block();
       --cleaning_buffer_counter;                // Count down for abort print
-      #ifdef SD_FINISHED_RELEASECOMMAND
-        if (!cleaning_buffer_counter && (SD_FINISHED_STEPPERRELEASE)) enqueue_and_echo_commands_P(PSTR(SD_FINISHED_RELEASECOMMAND));
+      #if ENABLED(SD_FINISHED_STEPPERRELEASE) && defined(SD_FINISHED_RELEASECOMMAND)
+        if (!cleaning_buffer_counter) enqueue_and_echo_commands_P(PSTR(SD_FINISHED_RELEASECOMMAND));
       #endif
     }
     current_block = NULL;                       // Prep to get a new block after cleaning
@@ -447,13 +447,10 @@ void Stepper::isr() {
   }
 
   // If there is no current block, attempt to pop one from the buffer
-  bool first_step = false;
   if (!current_block) {
     // Anything in the buffer?
     if ((current_block = planner.get_current_block())) {
       trapezoid_generator_reset();
-      TCNT1 = 0;  // make sure first pulse is not truncated
-      first_step = true;
 
       // Initialize Bresenham counters to 1/2 the ceiling
       counter_X = counter_Y = counter_Z = counter_E = -(current_block->step_event_count >> 1);
@@ -708,14 +705,8 @@ void Stepper::isr() {
   // Calculate new timer value
   if (step_events_completed <= (uint32_t)current_block->accelerate_until) {
 
-    if (first_step) {
-      acc_step_rate = current_block->initial_rate;
-      acceleration_time = 0;
-    }
-    else {
-      MultiU24X32toH16(acc_step_rate, acceleration_time, current_block->acceleration_rate);
-      acc_step_rate += current_block->initial_rate;
-    }
+    MultiU24X32toH16(acc_step_rate, acceleration_time, current_block->acceleration_rate);
+    acc_step_rate += current_block->initial_rate;
 
     // upper limit
     NOMORE(acc_step_rate, current_block->nominal_rate);
@@ -723,7 +714,7 @@ void Stepper::isr() {
     // step_rate to timer interval
     const uint16_t interval = calc_timer_interval(acc_step_rate);
 
-    SPLIT(interval);  // split step into multiple ISRs if larger than  ENDSTOP_NOMINAL_OCR_VAL
+    SPLIT(interval);  // split step into multiple ISRs if larger than ENDSTOP_NOMINAL_OCR_VAL
     _NEXT_ISR(ocr_val);
 
     acceleration_time += interval;
@@ -756,7 +747,7 @@ void Stepper::isr() {
     // step_rate to timer interval
     const uint16_t interval = calc_timer_interval(step_rate);
 
-    SPLIT(interval);  // split step into multiple ISRs if larger than  ENDSTOP_NOMINAL_OCR_VAL
+    SPLIT(interval);  // split step into multiple ISRs if larger than ENDSTOP_NOMINAL_OCR_VAL
     _NEXT_ISR(ocr_val);
 
     deceleration_time += interval;
@@ -786,7 +777,7 @@ void Stepper::isr() {
 
     #endif
 
-    SPLIT(OCR1A_nominal);  // split step into multiple ISRs if larger than  ENDSTOP_NOMINAL_OCR_VAL
+    SPLIT(OCR1A_nominal);  // split step into multiple ISRs if larger than ENDSTOP_NOMINAL_OCR_VAL
     _NEXT_ISR(ocr_val);
 
     // ensure we're running at the correct step rate, even if we just came off an acceleration
@@ -965,6 +956,16 @@ void Stepper::init() {
     tmc2130_init();
   #endif
 
+  // Init TMC2208 Steppers
+  #if ENABLED(HAVE_TMC2208)
+    tmc2208_init();
+  #endif
+
+  // TRAMS, TMC2130 and TMC2208 advanced settings
+  #if HAS_TRINAMIC
+    TMC_ADV()
+  #endif
+
   // Init L6470 Steppers
   #if ENABLED(HAVE_L6470DRIVER)
     L6470_init();
@@ -1009,7 +1010,7 @@ void Stepper::init() {
   #if HAS_X_ENABLE
     X_ENABLE_INIT;
     if (!X_ENABLE_ON) X_ENABLE_WRITE(HIGH);
-    #if ENABLED(DUAL_X_CARRIAGE) && HAS_X2_ENABLE
+    #if (ENABLED(DUAL_X_CARRIAGE) || ENABLED(X_DUAL_STEPPER_DRIVERS)) && HAS_X2_ENABLE
       X2_ENABLE_INIT;
       if (!X_ENABLE_ON) X2_ENABLE_WRITE(HIGH);
     #endif
@@ -1198,7 +1199,7 @@ void Stepper::set_e_position(const long &e) {
 /**
  * Get a stepper's position in steps.
  */
-long Stepper::position(AxisEnum axis) {
+long Stepper::position(const AxisEnum axis) {
   CRITICAL_SECTION_START;
   const long count_pos = count_position[axis];
   CRITICAL_SECTION_END;
@@ -1209,7 +1210,7 @@ long Stepper::position(AxisEnum axis) {
  * Get an axis position according to stepper position(s)
  * For CORE machines apply translation from ABC to XYZ.
  */
-float Stepper::get_axis_position_mm(AxisEnum axis) {
+float Stepper::get_axis_position_mm(const AxisEnum axis) {
   float axis_steps;
   #if IS_CORE
     // Requesting one of the "core" axes?

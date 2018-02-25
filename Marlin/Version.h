@@ -48,8 +48,12 @@
    * here we define this default string as the date where the latest release
    * version was tagged.
    */
+<<<<<<< HEAD
 
   #define STRING_DISTRIBUTION_DATE "2017-10-24 12:00"
+=======
+  #define STRING_DISTRIBUTION_DATE "2018-01-20"
+>>>>>>> refs/remotes/MarlinFirmware/bugfix-1.1.x
 
   /**
    * Required minimum Configuration.h and Configuration_adv.h file versions.

@@ -113,6 +113,72 @@
 #define E1_ENABLE_PIN      30
 #define E1_CS_PIN          44
 
+/**
+ * Default pins for TMC software SPI
+ */
+#if ENABLED(TMC_USE_SW_SPI)
+  #ifndef TMC_SW_MOSI
+    #define TMC_SW_MOSI    66
+  #endif
+  #ifndef TMC_SW_MISO
+    #define TMC_SW_MISO    44
+  #endif
+  #ifndef TMC_SW_SCK
+    #define TMC_SW_SCK     64
+  #endif
+#endif
+
+
+#if ENABLED(HAVE_TMC2208)
+  /**
+   * TMC2208 stepper drivers
+   *
+   * Hardware serial communication ports.
+   * If undefined software serial is used according to the pins below
+   */
+  //#define X_HARDWARE_SERIAL  Serial1
+  //#define X2_HARDWARE_SERIAL Serial1
+  //#define Y_HARDWARE_SERIAL  Serial1
+  //#define Y2_HARDWARE_SERIAL Serial1
+  //#define Z_HARDWARE_SERIAL  Serial1
+  //#define Z2_HARDWARE_SERIAL Serial1
+  //#define E0_HARDWARE_SERIAL Serial1
+  //#define E1_HARDWARE_SERIAL Serial1
+  //#define E2_HARDWARE_SERIAL Serial1
+  //#define E3_HARDWARE_SERIAL Serial1
+  //#define E4_HARDWARE_SERIAL Serial1
+
+  /**
+   * Software serial
+   */
+
+  #define X_SERIAL_TX_PIN    59
+  #define X_SERIAL_RX_PIN    63
+  #define X2_SERIAL_TX_PIN   -1
+  #define X2_SERIAL_RX_PIN   -1
+
+  #define Y_SERIAL_TX_PIN    64
+  #define Y_SERIAL_RX_PIN    40
+  #define Y2_SERIAL_TX_PIN   -1
+  #define Y2_SERIAL_RX_PIN   -1
+
+  #define Z_SERIAL_TX_PIN    44
+  #define Z_SERIAL_RX_PIN    42
+  #define Z2_SERIAL_TX_PIN   -1
+  #define Z2_SERIAL_RX_PIN   -1
+
+  #define E0_SERIAL_TX_PIN   66
+  #define E0_SERIAL_RX_PIN   65
+  #define E1_SERIAL_TX_PIN   -1
+  #define E1_SERIAL_RX_PIN   -1
+  #define E2_SERIAL_TX_PIN   -1
+  #define E2_SERIAL_RX_PIN   -1
+  #define E3_SERIAL_TX_PIN   -1
+  #define E3_SERIAL_RX_PIN   -1
+  #define E4_SERIAL_TX_PIN   -1
+  #define E4_SERIAL_RX_PIN   -1
+#endif
+
 //
 // Temperature Sensors
 //
@@ -201,14 +267,16 @@
 #endif
 
 // define digital pin 4 for the filament runout sensor. Use the RAMPS 1.4 digital input 4 on the servos connector
-#define FIL_RUNOUT_PIN      4
+#ifndef FIL_RUNOUT_PIN
+  #define FIL_RUNOUT_PIN    4
+#endif
 
 #ifndef PS_ON_PIN
   #define PS_ON_PIN        12
 #endif
 
 #if ENABLED(CASE_LIGHT_ENABLE) && !PIN_EXISTS(CASE_LIGHT) && !defined(SPINDLE_LASER_ENABLE_PIN)
-  #if !defined(NUM_SERVOS) || NUM_SERVOS == 0 // try to use servo connector first
+  #if !defined(NUM_SERVOS) || NUM_SERVOS <= 1 // try to use servo connector first
     #define CASE_LIGHT_PIN   6      // MUST BE HARDWARE PWM
   #elif !(ENABLED(ULTRA_LCD) && ENABLED(NEWPANEL) \
       && (ENABLED(PANEL_ONE) || ENABLED(VIKI2) || ENABLED(miniVIKI) || ENABLED(MINIPANEL) || ENABLED(REPRAPWORLD_KEYPAD)))  // try to use AUX 2
@@ -283,7 +351,7 @@
 
     #else
 
-      #if ENABLED(MKS_12864OLED)
+      #if ENABLED(MKS_12864OLED) || ENABLED(MKS_12864OLED_SSD1306)
         #define LCD_PINS_DC     25 // Set as output on init
         #define LCD_PINS_RS     27 // Pull low for 1s to init
         // DOGM SPI LCD Support
@@ -482,7 +550,7 @@
 
 #endif // ULTRA_LCD
 
-#if ENABLED(ANET_KEYPAD_LCD)
+#if ENABLED(ZONESTAR_LCD)
   #define LCD_PINS_RS        64
   #define LCD_PINS_ENABLE    44
   #define LCD_PINS_D4        63
@@ -494,4 +562,4 @@
   #define BTN_EN2            -1
   #define BTN_ENC            -1
   // pin 29 N/C
-#endif // ANET_KEYPAD_LCD
+#endif // ZONESTAR_LCD

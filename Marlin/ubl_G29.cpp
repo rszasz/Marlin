@@ -24,8 +24,6 @@
 
 #if ENABLED(AUTO_BED_LEVELING_UBL)
 
-  //#define UBL_DEVEL_DEBUGGING
-
   #include "ubl.h"
   #include "Marlin.h"
   #include "hex_print_routines.h"
@@ -34,6 +32,7 @@
   #include "stepper.h"
   #include "planner.h"
   #include "gcode.h"
+  #include "serial.h"
   #include "bitmap_flags.h"
 
   #include <math.h>
@@ -99,8 +98,9 @@
    *   C     Continue   G29 P1 C continues the generation of a partially-constructed Mesh without invalidating
    *                    previous measurements.
    *
-   *   C     Constant   G29 P2 C specifies a Constant and tells the Manual Probe subsystem to use the current
-   *                    location in its search for the closest unmeasured Mesh Point.
+   *   C                G29 P2 C tells the Manual Probe subsystem to not use the current nozzle
+   *                    location in its search for the closest unmeasured Mesh Point.  Instead, attempt to
+   *                    start at one end of the uprobed points and Continue sequentually.
    *
    *                    G29 P3 C specifies the Constant for the fill. Otherwise, uses a "reasonable" value.
    *
@@ -310,11 +310,6 @@
 
   void unified_bed_leveling::G29() {
 
-    if (!settings.calc_num_meshes()) {
-      SERIAL_PROTOCOLLNPGM("?Enable EEPROM and init with M502, M500.\n");
-      return;
-    }
-
     if (g29_parameter_parsing()) return; // abort if parsing the simple parameters causes a problem,
 
     // Check for commands that require the printer to be homed
@@ -421,6 +416,7 @@
           tilt_mesh_based_on_3pts(z1, z2, z3);
           restore_ubl_active_state_and_leave();
         }
+        do_blocking_move_to_xy(0.5 * (MESH_MAX_X - (MESH_MIN_X)), 0.5 * (MESH_MAX_Y - (MESH_MIN_Y)));
       }
 
     #endif // HAS_BED_PROBE
@@ -470,7 +466,7 @@
             SERIAL_PROTOCOLLNPGM("Manually probing unreachable mesh locations.");
             do_blocking_move_to_z(Z_CLEARANCE_BETWEEN_PROBES);
 
-            if (!g29_x_flag && !g29_y_flag) {
+            if (parser.seen('C') && !g29_x_flag && !g29_y_flag) {
               /**
                * Use a good default location for the path.
                * The flipped > and < operators in these comparisons is intentional.
@@ -487,10 +483,6 @@
               #endif
             }
 
-            if (parser.seen('C')) {
-              g29_x_pos = current_position[X_AXIS];
-              g29_y_pos = current_position[Y_AXIS];
-            }
 
             if (parser.seen('B')) {
               g29_card_thickness = parser.has_value() ? parser.value_float() : measure_business_card_thickness(Z_CLEARANCE_BETWEEN_PROBES);
@@ -678,7 +670,7 @@
     #if ENABLED(NEWPANEL)
       lcd_reset_alert_level();
       LCD_MESSAGEPGM("");
-      lcd_quick_feedback();
+      lcd_quick_feedback(true);
       lcd_external_control = false;
     #endif
 
@@ -736,12 +728,13 @@
 
     bool click_and_hold(const clickFunc_t func=NULL) {
       if (is_lcd_clicked()) {
-        lcd_quick_feedback();
+        lcd_quick_feedback(false); // Do NOT clear button status!  If cleared, the code
+                                   // code can not look for a 'click and hold'
         const millis_t nxt = millis() + 1500UL;
         while (is_lcd_clicked()) {                // Loop while the encoder is pressed. Uses hardware flag!
           idle();                                 // idle, of course
           if (ELAPSED(millis(), nxt)) {           // After 1.5 seconds
-            lcd_quick_feedback();
+            lcd_quick_feedback(true);
             if (func) (*func)();
             wait_for_release();
             safe_delay(50);                       // Debounce the Encoder wheel
@@ -749,6 +742,7 @@
           }
         }
       }
+      safe_delay(15);
       return false;
     }
 
@@ -777,11 +771,13 @@
         #if ENABLED(NEWPANEL)
           if (is_lcd_clicked()) {
             SERIAL_PROTOCOLLNPGM("\nMesh only partially populated.\n");
-            lcd_quick_feedback();
+            lcd_quick_feedback(false);
             STOW_PROBE();
-            wait_for_release();
+            while (is_lcd_clicked()) idle();
             lcd_external_control = false;
             restore_ubl_active_state_and_leave();
+            lcd_quick_feedback(true);
+            safe_delay(50);  // Debounce the Encoder wheel
             return;
           }
         #endif
@@ -798,7 +794,9 @@
           const float measured_z = probe_pt(rawx, rawy, stow_probe, g29_verbose_level); // TODO: Needs error handling
           z_values[location.x_index][location.y_index] = measured_z;
         }
-
+        MYSERIAL.flush();  // G29 P2's take a long time to complete.   PronterFace can
+                           // over run the serial character buffer with M105's without
+                           // this fix
       } while (location.x_index >= 0 && --max_iterations);
 
       STOW_PROBE();
@@ -938,7 +936,7 @@
 
     static void echo_and_take_a_measurement() { SERIAL_PROTOCOLLNPGM(" and take a measurement."); }
 
-    float unified_bed_leveling::measure_business_card_thickness(const float &in_height) {
+    float unified_bed_leveling::measure_business_card_thickness(float in_height) {
       lcd_external_control = true;
       save_ubl_active_state_and_disable();   // Disable bed level correction for probing
 
@@ -983,6 +981,7 @@
       do_blocking_move_to_z(Z_CLEARANCE_DEPLOY_PROBE);
       lcd_external_control = false;
       KEEPALIVE_STATE(IN_HANDLER);
+      lcd_quick_feedback(true);
       ubl.restore_ubl_active_state_and_leave();
     }
 
@@ -991,7 +990,7 @@
       lcd_external_control = true;
 
       save_ubl_active_state_and_disable();   // we don't do bed level correction because we want the raw data when we probe
-      do_blocking_move_to(rx, ry, Z_CLEARANCE_BETWEEN_PROBES);
+      do_blocking_move_to(current_position[X_AXIS], current_position[Y_AXIS], z_clearance);
 
       lcd_return_to_status();
 
@@ -1038,9 +1037,12 @@
           SERIAL_PROTOCOL_F(z_values[location.x_index][location.y_index], 6);
           SERIAL_EOL();
         }
+        MYSERIAL.flush();  // G29 P2's take a long time to complete.   PronterFace can
+                           // over run the serial character buffer with M105's without
+                           // this fix
       } while (location.x_index >= 0 && location.y_index >= 0);
 
-      if (do_ubl_mesh_map) display_map(g29_map_type);
+      if (do_ubl_mesh_map) display_map(g29_map_type);  // show user where we're probing
 
       restore_ubl_active_state_and_leave();
       KEEPALIVE_STATE(IN_HANDLER);
@@ -1053,7 +1055,7 @@
 
     #if ENABLED(NEWPANEL)
       LCD_MESSAGEPGM(MSG_UBL_DOING_G29);
-      lcd_quick_feedback();
+      lcd_quick_feedback(true);
     #endif
 
     g29_constant = 0.0;
@@ -1165,18 +1167,18 @@
 
   static uint8_t ubl_state_at_invocation = 0;
 
-  #ifdef UBL_DEVEL_DEBUGGING
+  #if ENABLED(UBL_DEVEL_DEBUGGING)
     static uint8_t ubl_state_recursion_chk = 0;
   #endif
 
   void unified_bed_leveling::save_ubl_active_state_and_disable() {
-    #ifdef UBL_DEVEL_DEBUGGING
+    #if ENABLED(UBL_DEVEL_DEBUGGING)
       ubl_state_recursion_chk++;
       if (ubl_state_recursion_chk != 1) {
         SERIAL_ECHOLNPGM("save_ubl_active_state_and_disabled() called multiple times in a row.");
         #if ENABLED(NEWPANEL)
           LCD_MESSAGEPGM(MSG_UBL_SAVE_ERROR);
-          lcd_quick_feedback();
+          lcd_quick_feedback(true);
         #endif
         return;
       }
@@ -1186,12 +1188,12 @@
   }
 
   void unified_bed_leveling::restore_ubl_active_state_and_leave() {
-    #ifdef UBL_DEVEL_DEBUGGING
+    #if ENABLED(UBL_DEVEL_DEBUGGING)
       if (--ubl_state_recursion_chk) {
         SERIAL_ECHOLNPGM("restore_ubl_active_state_and_leave() called too many times.");
         #if ENABLED(NEWPANEL)
           LCD_MESSAGEPGM(MSG_UBL_RESTORE_ERROR);
-          lcd_quick_feedback();
+          lcd_quick_feedback(true);
         #endif
         return;
       }
@@ -1218,7 +1220,7 @@
     SERIAL_PROTOCOLLNPAIR("UBL object count: ", (int)ubl_cnt);
 
     #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
-      SERIAL_PROTOCOL("planner.z_fade_height : ");
+      SERIAL_PROTOCOLPGM("planner.z_fade_height : ");
       SERIAL_PROTOCOL_F(planner.z_fade_height, 4);
       SERIAL_EOL();
     #endif
@@ -1232,17 +1234,20 @@
     #endif
 
     SERIAL_ECHOLNPAIR("MESH_MIN_X  " STRINGIFY(MESH_MIN_X) "=", MESH_MIN_X);
+    safe_delay(50);
     SERIAL_ECHOLNPAIR("MESH_MIN_Y  " STRINGIFY(MESH_MIN_Y) "=", MESH_MIN_Y);
-    safe_delay(25);
+    safe_delay(50);
     SERIAL_ECHOLNPAIR("MESH_MAX_X  " STRINGIFY(MESH_MAX_X) "=", MESH_MAX_X);
+    safe_delay(50);
     SERIAL_ECHOLNPAIR("MESH_MAX_Y  " STRINGIFY(MESH_MAX_Y) "=", MESH_MAX_Y);
-    safe_delay(25);
+    safe_delay(50);
     SERIAL_ECHOLNPAIR("GRID_MAX_POINTS_X  ", GRID_MAX_POINTS_X);
+    safe_delay(50);
     SERIAL_ECHOLNPAIR("GRID_MAX_POINTS_Y  ", GRID_MAX_POINTS_Y);
-    safe_delay(25);
+    safe_delay(50);
     SERIAL_ECHOLNPAIR("MESH_X_DIST  ", MESH_X_DIST);
     SERIAL_ECHOLNPAIR("MESH_Y_DIST  ", MESH_Y_DIST);
-    safe_delay(25);
+    safe_delay(50);
 
     SERIAL_PROTOCOLPGM("X-Axis Mesh Points at: ");
     for (uint8_t i = 0; i < GRID_MAX_POINTS_X; i++) {
@@ -1267,15 +1272,15 @@
     SERIAL_EOL();
     safe_delay(50);
 
-    #ifdef UBL_DEVEL_DEBUGGING
+    #if ENABLED(UBL_DEVEL_DEBUGGING)
       SERIAL_PROTOCOLLNPAIR("ubl_state_at_invocation :", ubl_state_at_invocation);
       SERIAL_EOL();
       SERIAL_PROTOCOLLNPAIR("ubl_state_recursion_chk :", ubl_state_recursion_chk);
       SERIAL_EOL();
       safe_delay(50);
 
-      SERIAL_PROTOCOLPAIR("Meshes go from ", hex_address((void*)settings.get_start_of_meshes()));
-      SERIAL_PROTOCOLLNPAIR(" to ", hex_address((void*)settings.get_end_of_meshes()));
+      SERIAL_PROTOCOLPAIR("Meshes go from ", hex_address((void*)settings.meshes_start_index()));
+      SERIAL_PROTOCOLLNPAIR(" to ", hex_address((void*)settings.meshes_end_index()));
       safe_delay(50);
 
       SERIAL_PROTOCOLLNPAIR("sizeof(ubl) :  ", (int)sizeof(ubl));
@@ -1284,7 +1289,7 @@
       SERIAL_EOL();
       safe_delay(25);
 
-      SERIAL_PROTOCOLLNPAIR("EEPROM free for UBL: ", hex_address((void*)(settings.get_end_of_meshes() - settings.get_start_of_meshes())));
+      SERIAL_PROTOCOLLNPAIR("EEPROM free for UBL: ", hex_address((void*)(settings.meshes_end_index() - settings.meshes_start_index())));
       safe_delay(50);
 
       SERIAL_PROTOCOLPAIR("EEPROM can hold ", settings.calc_num_meshes());
@@ -1480,6 +1485,7 @@
       lcd_return_to_status();
       do_blocking_move_to_z(Z_CLEARANCE_BETWEEN_PROBES);
       LCD_MESSAGEPGM(MSG_EDITING_STOPPED);
+      lcd_quick_feedback(true);
     }
 
     void unified_bed_leveling::fine_tune_mesh(const float &rx, const float &ry, const bool do_ubl_mesh_map) {
@@ -1539,13 +1545,16 @@
 
         lcd_mesh_edit_setup(new_z);
 
-        while (!is_lcd_clicked()) {
+        do {
           new_z = lcd_mesh_edit();
           #if ENABLED(UBL_MESH_EDIT_MOVES_Z)
             do_blocking_move_to_z(h_offset + new_z); // Move the nozzle as the point is edited
           #endif
           idle();
-        }
+          MYSERIAL.flush();  // G29 P2's take a long time to complete.   PronterFace can
+                             // over run the serial character buffer with M105's without
+                             // this fix
+        } while (!is_lcd_clicked());
 
         if (!lcd_map_control) lcd_return_to_status();
 
@@ -1554,9 +1563,6 @@
         // Let's work on specifying a proper API for the LCD ASAP, OK?
         lcd_external_control = true;
 
-        // this sequence to detect an is_lcd_clicked() debounce it and leave if it is
-        // a Press and Hold is repeated in a lot of places (including G26_Mesh_Validation.cpp).   This
-        // should be redone and compressed.
         if (click_and_hold(abort_fine_tune))
           goto FINE_TUNE_EXIT;
 
@@ -1600,10 +1606,10 @@
                  y1 = y + ydir, y2 = y1 + ydir;
     // A NAN next to a pair of real values?
     if (isnan(z_values[x][y]) && !isnan(z_values[x1][y1]) && !isnan(z_values[x2][y2])) {
-      if (z_values[x1][y1] < z_values[x2][y2])                  // Angled downward?
-        z_values[x][y] = z_values[x1][y1];                      // Use nearest (maybe a little too high.)
+      if (z_values[x1][y1] < z_values[x2][y2])                       // Angled downward?
+        z_values[x][y] = z_values[x1][y1];                           // Use nearest (maybe a little too high.)
       else
-        z_values[x][y] = 2.0 * z_values[x1][y1] - z_values[x2][y2];   // Angled upward...
+        z_values[x][y] = 2.0 * z_values[x1][y1] - z_values[x2][y2];  // Angled upward...
       return true;
     }
     return false;
@@ -1761,7 +1767,7 @@
 
       #if ENABLED(DEBUG_LEVELING_FEATURE)
         if (DEBUGGING(LEVELING)) {
-          rotation.debug(PSTR("rotation matrix:"));
+          rotation.debug(PSTR("rotation matrix:\n"));
           SERIAL_ECHOPGM("LSF Results A=");
           SERIAL_PROTOCOL_F(lsf_results.A, 7);
           SERIAL_ECHOPGM("  B=");
@@ -1782,7 +1788,6 @@
         }
       #endif
 
-      if (do_ubl_mesh_map) display_map(g29_map_type);
     }
 
   #endif // HAS_BED_PROBE

@@ -26,6 +26,9 @@
 #include "MarlinConfig.h"
 
 #if ENABLED(AUTO_BED_LEVELING_UBL)
+
+  //#define UBL_DEVEL_DEBUGGING
+
   #include "Marlin.h"
   #include "planner.h"
   #include "math.h"
@@ -41,7 +44,11 @@
 
   // ubl_motion.cpp
 
-  void debug_current_and_destination(const char * const title);
+  #if ENABLED(UBL_DEVEL_DEBUGGING)
+    void debug_current_and_destination(const char * const title);
+  #else
+    FORCE_INLINE void debug_current_and_destination(const char * const title) { UNUSED(title); }
+  #endif
 
   // ubl_G29.cpp
 
@@ -58,7 +65,7 @@
 
   #if ENABLED(ULTRA_LCD)
     extern char lcd_status_message[];
-    void lcd_quick_feedback();
+    void lcd_quick_feedback(const bool clear_buttons);
   #endif
 
   #define MESH_X_DIST (float(MESH_MAX_X - (MESH_MIN_X)) / float(GRID_MAX_POINTS_X - 1))
@@ -84,15 +91,15 @@
       #if ENABLED(NEWPANEL)
         static void move_z_with_encoder(const float &multiplier);
         static float measure_point_with_encoder();
-        static float measure_business_card_thickness(const float&);
-        static void manually_probe_remaining_mesh(const float&, const float&, const float&, const float&, const bool);
-        static void fine_tune_mesh(const float &rx, const float &ry, const bool do_ubl_mesh_map);
+        static float measure_business_card_thickness(const float);
+        static void manually_probe_remaining_mesh(const float&, const float&, const float&, const float&, const bool) _O0;
+        static void fine_tune_mesh(const float &rx, const float &ry, const bool do_ubl_mesh_map) _O0;
       #endif
 
-      static bool g29_parameter_parsing();
+      static bool g29_parameter_parsing() _O0;
       static void find_mean_mesh_height();
       static void shift_mesh_height();
-      static void probe_entire_mesh(const float &rx, const float &ry, const bool do_ubl_mesh_map, const bool stow_probe, bool do_furthest);
+      static void probe_entire_mesh(const float &rx, const float &ry, const bool do_ubl_mesh_map, const bool stow_probe, bool do_furthest) _O0;
       static void tilt_mesh_based_on_3pts(const float &z1, const float &z2, const float &z3);
       static void tilt_mesh_based_on_probed_grid(const bool do_ubl_mesh_map);
       static void g29_what_command();
@@ -107,16 +114,16 @@
       static void report_state();
       static void save_ubl_active_state_and_disable();
       static void restore_ubl_active_state_and_leave();
-      static void display_map(const int);
-      static mesh_index_pair find_closest_mesh_point_of_type(const MeshPointType, const float&, const float&, const bool, uint16_t[16]);
-      static mesh_index_pair find_furthest_invalid_mesh_point();
+      static void display_map(const int) _O0;
+      static mesh_index_pair find_closest_mesh_point_of_type(const MeshPointType, const float&, const float&, const bool, uint16_t[16]) _O0;
+      static mesh_index_pair find_furthest_invalid_mesh_point() _O0;
       static void reset();
       static void invalidate();
       static void set_all_mesh_points_to_value(const float);
       static bool sanity_check();
 
-      static void G29() _O0;                          // O0 for no optimization
-      static void smart_fill_wlsf(const float &) _O2; // O2 gives smaller code than Os on A2560
+      static void G29() _O0;                      // O0 for no optimization
+      static void smart_fill_wlsf(const float &); // O2 gives smaller code than Os on A2560
       static int8_t storage_slot;
 
       static float z_values[GRID_MAX_POINTS_X][GRID_MAX_POINTS_Y];
@@ -319,21 +326,24 @@
         return i < GRID_MAX_POINTS_Y ? pgm_read_float(&_mesh_index_to_ypos[i]) : MESH_MIN_Y + i * (MESH_Y_DIST);
       }
 
-      static bool prepare_segmented_line_to(const float rtarget[XYZE], const float &feedrate);
-      static void line_to_destination_cartesian(const float &fr, uint8_t e);
+      #if UBL_SEGMENTED
+        static bool prepare_segmented_line_to(const float (&rtarget)[XYZE], const float &feedrate);
+      #else
+        static void line_to_destination_cartesian(const float &fr, const uint8_t e);
+      #endif
 
-    #define _CMPZ(a,b) (z_values[a][b] == z_values[a][b+1])
-    #define CMPZ(a) (_CMPZ(a, 0) && _CMPZ(a, 1))
-    #define ZZER(a) (z_values[a][0] == 0)
+      #define _CMPZ(a,b) (z_values[a][b] == z_values[a][b+1])
+      #define CMPZ(a) (_CMPZ(a, 0) && _CMPZ(a, 1))
+      #define ZZER(a) (z_values[a][0] == 0)
 
-    FORCE_INLINE bool mesh_is_valid() {
-      return !(
-        (    CMPZ(0) && CMPZ(1) && CMPZ(2) // adjacent z values all equal?
-          && ZZER(0) && ZZER(1) && ZZER(2) // all zero at the edge?
-        )
-        || isnan(z_values[0][0])
-      );
-    }
+      FORCE_INLINE bool mesh_is_valid() {
+        return !(
+          (    CMPZ(0) && CMPZ(1) && CMPZ(2) // adjacent z values all equal?
+            && ZZER(0) && ZZER(1) && ZZER(2) // all zero at the edge?
+          )
+          || isnan(z_values[0][0])
+        );
+      }
   }; // class unified_bed_leveling
 
   extern unified_bed_leveling ubl;

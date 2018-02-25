@@ -142,7 +142,7 @@ class Planner {
      *            head!=tail : blocks are in the buffer
      *   head==(tail-1)%size : the buffer is full
      *
-     *  Writer of head is Planner::_buffer_line().
+     *  Writer of head is Planner::buffer_segment().
      *  Reader of tail is Stepper::isr(). Always consider tail busy / read-only
      */
     static block_t block_buffer[BLOCK_BUFFER_SIZE];
@@ -155,11 +155,14 @@ class Planner {
 
     static int16_t flow_percentage[EXTRUDERS];      // Extrusion factor for each extruder
 
-    static float e_factor[EXTRUDERS],               // The flow percentage and volumetric multiplier combine to scale E movement
-                 filament_size[EXTRUDERS],          // diameter of filament (in millimeters), typically around 1.75 or 2.85, 0 disables the volumetric calculations for the extruder
-                 volumetric_area_nominal,           // Nominal cross-sectional area
-                 volumetric_multiplier[EXTRUDERS];  // Reciprocal of cross-sectional area of filament (in mm^2). Pre-calculated to reduce computation in the planner
-                                                    // May be auto-adjusted by a filament width sensor
+    static float e_factor[EXTRUDERS];               // The flow percentage and volumetric multiplier combine to scale E movement
+
+    #if DISABLED(NO_VOLUMETRICS)
+      static float filament_size[EXTRUDERS],          // diameter of filament (in millimeters), typically around 1.75 or 2.85, 0 disables the volumetric calculations for the extruder
+                   volumetric_area_nominal,           // Nominal cross-sectional area
+                   volumetric_multiplier[EXTRUDERS];  // Reciprocal of cross-sectional area of filament (in mm^2). Pre-calculated to reduce computation in the planner
+                                                      // May be auto-adjusted by a filament width sensor
+    #endif
 
     static float max_feedrate_mm_s[XYZE_N],         // Max speeds in mm per second
                  axis_steps_per_mm[XYZE_N],
@@ -188,7 +191,9 @@ class Planner {
     #endif
 
     #if ENABLED(LIN_ADVANCE)
-      static float extruder_advance_k, advance_ed_ratio;
+      static float extruder_advance_k, advance_ed_ratio,
+                   position_float[XYZE],
+                   lin_dist_xy, lin_dist_e;
     #endif
 
     #if ENABLED(SKEW_CORRECTION)
@@ -273,7 +278,11 @@ class Planner {
     static void refresh_positioning();
 
     FORCE_INLINE static void refresh_e_factor(const uint8_t e) {
-      e_factor[e] = volumetric_multiplier[e] * flow_percentage[e] * 0.01;
+      e_factor[e] = (flow_percentage[e] * 0.01
+        #if DISABLED(NO_VOLUMETRICS)
+          * volumetric_multiplier[e]
+        #endif
+      );
     }
 
     // Manage fans, paste pressure, etc.
@@ -289,12 +298,20 @@ class Planner {
     // Update multipliers based on new diameter measurements
     static void calculate_volumetric_multipliers();
 
-    FORCE_INLINE static void set_filament_size(const uint8_t e, const float &v) {
-      filament_size[e] = v;
-      // make sure all extruders have some sane value for the filament size
-      for (uint8_t i = 0; i < COUNT(filament_size); i++)
-        if (!filament_size[i]) filament_size[i] = DEFAULT_NOMINAL_FILAMENT_DIA;
-    }
+    #if ENABLED(FILAMENT_WIDTH_SENSOR)
+      void calculate_volumetric_for_width_sensor(const int8_t encoded_ratio);
+    #endif
+
+    #if DISABLED(NO_VOLUMETRICS)
+
+      FORCE_INLINE static void set_filament_size(const uint8_t e, const float &v) {
+        filament_size[e] = v;
+        // make sure all extruders have some sane value for the filament size
+        for (uint8_t i = 0; i < COUNT(filament_size); i++)
+          if (!filament_size[i]) filament_size[i] = DEFAULT_NOMINAL_FILAMENT_DIA;
+      }
+
+    #endif
 
     #if ENABLED(ENABLE_LEVELING_FADE_HEIGHT)
 
@@ -341,6 +358,30 @@ class Planner {
 
     #endif
 
+    #if ENABLED(SKEW_CORRECTION)
+
+      FORCE_INLINE static void skew(float &cx, float &cy, const float &cz) {
+        if (WITHIN(cx, X_MIN_POS + 1, X_MAX_POS) && WITHIN(cy, Y_MIN_POS + 1, Y_MAX_POS)) {
+          const float sx = cx - cy * xy_skew_factor - cz * (xz_skew_factor - (xy_skew_factor * yz_skew_factor)),
+                      sy = cy - cz * yz_skew_factor;
+          if (WITHIN(sx, X_MIN_POS, X_MAX_POS) && WITHIN(sy, Y_MIN_POS, Y_MAX_POS)) {
+            cx = sx; cy = sy;
+          }
+        }
+      }
+
+      FORCE_INLINE static void unskew(float &cx, float &cy, const float &cz) {
+        if (WITHIN(cx, X_MIN_POS, X_MAX_POS) && WITHIN(cy, Y_MIN_POS, Y_MAX_POS)) {
+          const float sx = cx + cy * xy_skew_factor + cz * xz_skew_factor,
+                      sy = cy + cz * yz_skew_factor;
+          if (WITHIN(sx, X_MIN_POS, X_MAX_POS) && WITHIN(sy, Y_MIN_POS, Y_MAX_POS)) {
+            cx = sx; cy = sy;
+          }
+        }
+      }
+
+    #endif // SKEW_CORRECTION
+
     #if PLANNER_LEVELING
 
       #define ARG_X float rx
@@ -352,7 +393,7 @@ class Planner {
        * as it will be given to the planner and steppers.
        */
       static void apply_leveling(float &rx, float &ry, float &rz);
-      static void apply_leveling(float raw[XYZ]) { apply_leveling(raw[X_AXIS], raw[Y_AXIS], raw[Z_AXIS]); }
+      static void apply_leveling(float (&raw)[XYZ]) { apply_leveling(raw[X_AXIS], raw[Y_AXIS], raw[Z_AXIS]); }
       static void unapply_leveling(float raw[XYZ]);
 
     #else
@@ -371,21 +412,23 @@ class Planner {
      *  target      - target position in steps units
      *  fr_mm_s     - (target) speed of the move
      *  extruder    - target extruder
+     *  millimeters - the length of the movement, if known
      */
-    static void _buffer_steps(const int32_t (&target)[XYZE], float fr_mm_s, const uint8_t extruder);
+    static void _buffer_steps(const int32_t (&target)[XYZE], float fr_mm_s, const uint8_t extruder, const float &millimeters=0.0);
 
     /**
-     * Planner::_buffer_line
+     * Planner::buffer_segment
      *
      * Add a new linear movement to the buffer in axis units.
      *
      * Leveling and kinematics should be applied ahead of calling this.
      *
-     *  a,b,c,e   - target positions in mm and/or degrees
-     *  fr_mm_s   - (target) speed of the move
-     *  extruder  - target extruder
+     *  a,b,c,e     - target positions in mm and/or degrees
+     *  fr_mm_s     - (target) speed of the move
+     *  extruder    - target extruder
+     *  millimeters - the length of the movement, if known
      */
-    static void _buffer_line(const float &a, const float &b, const float &c, const float &e, const float &fr_mm_s, const uint8_t extruder);
+    static void buffer_segment(const float &a, const float &b, const float &c, const float &e, const float &fr_mm_s, const uint8_t extruder, const float &millimeters=0.0);
 
     static void _set_position_mm(const float &a, const float &b, const float &c, const float &e);
 
@@ -400,12 +443,13 @@ class Planner {
      *  rx,ry,rz,e   - target position in mm or degrees
      *  fr_mm_s      - (target) speed of the move (mm/s)
      *  extruder     - target extruder
+     *  millimeters  - the length of the movement, if known
      */
-    FORCE_INLINE static void buffer_line(ARG_X, ARG_Y, ARG_Z, const float &e, const float &fr_mm_s, const uint8_t extruder) {
+    FORCE_INLINE static void buffer_line(ARG_X, ARG_Y, ARG_Z, const float &e, const float &fr_mm_s, const uint8_t extruder, const float millimeters = 0.0) {
       #if PLANNER_LEVELING && IS_CARTESIAN
         apply_leveling(rx, ry, rz);
       #endif
-      _buffer_line(rx, ry, rz, e, fr_mm_s, extruder);
+      buffer_segment(rx, ry, rz, e, fr_mm_s, extruder, millimeters);
     }
 
     /**
@@ -413,22 +457,23 @@ class Planner {
      * The target is cartesian, it's translated to delta/scara if
      * needed.
      *
-     *  cart     - x,y,z,e CARTESIAN target in mm
-     *  fr_mm_s  - (target) speed of the move (mm/s)
-     *  extruder - target extruder
+     *  cart         - x,y,z,e CARTESIAN target in mm
+     *  fr_mm_s      - (target) speed of the move (mm/s)
+     *  extruder     - target extruder
+     *  millimeters  - the length of the movement, if known
      */
-    FORCE_INLINE static void buffer_line_kinematic(const float cart[XYZE], const float &fr_mm_s, const uint8_t extruder) {
+    FORCE_INLINE static void buffer_line_kinematic(const float (&cart)[XYZE], const float &fr_mm_s, const uint8_t extruder, const float millimeters = 0.0) {
       #if PLANNER_LEVELING
         float raw[XYZ] = { cart[X_AXIS], cart[Y_AXIS], cart[Z_AXIS] };
         apply_leveling(raw);
       #else
-        const float * const raw = cart;
+        const float (&raw)[XYZE] = cart;
       #endif
       #if IS_KINEMATIC
         inverse_kinematics(raw);
-        _buffer_line(delta[A_AXIS], delta[B_AXIS], delta[C_AXIS], cart[E_AXIS], fr_mm_s, extruder);
+        buffer_segment(delta[A_AXIS], delta[B_AXIS], delta[C_AXIS], cart[E_AXIS], fr_mm_s, extruder, millimeters);
       #else
-        _buffer_line(raw[X_AXIS], raw[Y_AXIS], raw[Z_AXIS], cart[E_AXIS], fr_mm_s, extruder);
+        buffer_segment(raw[X_AXIS], raw[Y_AXIS], raw[Z_AXIS], cart[E_AXIS], fr_mm_s, extruder, millimeters);
       #endif
     }
 
@@ -447,7 +492,7 @@ class Planner {
       #endif
       _set_position_mm(rx, ry, rz, e);
     }
-    static void set_position_mm_kinematic(const float position[NUM_AXIS]);
+    static void set_position_mm_kinematic(const float (&cart)[XYZE]);
     static void set_position_mm(const AxisEnum axis, const float &v);
     FORCE_INLINE static void set_z_position_mm(const float &z) { set_position_mm(Z_AXIS, z); }
     FORCE_INLINE static void set_e_position_mm(const float &e) { set_position_mm(AxisEnum(E_AXIS), e); }
@@ -489,6 +534,16 @@ class Planner {
     static block_t* get_current_block() {
       if (blocks_queued()) {
         block_t * const block = &block_buffer[block_buffer_tail];
+
+        // If the block has no trapezoid calculated, it's unsafe to execute.
+        if (movesplanned() > 1) {
+          block_t* next = &block_buffer[next_block_index(block_buffer_tail)];
+          if (TEST(block->flag, BLOCK_BIT_RECALCULATE) || TEST(next->flag, BLOCK_BIT_RECALCULATE))
+            return NULL;
+        }
+        else if (TEST(block->flag, BLOCK_BIT_RECALCULATE))
+          return NULL;
+
         #if ENABLED(ULTRA_LCD)
           block_buffer_runtime_us -= block->segment_time_us; // We can't be sure how long an active block will take, so don't count it.
         #endif

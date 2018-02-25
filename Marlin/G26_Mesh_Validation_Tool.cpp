@@ -34,6 +34,7 @@
   #include "temperature.h"
   #include "ultralcd.h"
   #include "gcode.h"
+  #include "serial.h"
   #include "bitmap_flags.h"
 
   #if ENABLED(MESH_BED_LEVELING)
@@ -132,16 +133,10 @@
 
   // External references
 
-  extern float feedrate_mm_s; // must set before calling prepare_move_to_destination
   extern Planner planner;
   #if ENABLED(ULTRA_LCD)
     extern char lcd_status_message[];
   #endif
-  extern float destination[XYZE];
-  void set_destination_from_current();
-  void prepare_move_to_destination();
-  inline void sync_plan_position_e() { planner.set_e_position_mm(current_position[E_AXIS]); }
-  inline void set_current_from_destination() { COPY(current_position, destination); }
 
   // Private functions
 
@@ -172,7 +167,7 @@
       if (!is_lcd_clicked()) return false; // Return if the button isn't pressed
       lcd_setstatusPGM(PSTR("Mesh Validation Stopped."), 99);
       #if ENABLED(ULTIPANEL)
-        lcd_quick_feedback();
+        lcd_quick_feedback(true);
       #endif
       wait_for_release();
       return true;
@@ -189,7 +184,7 @@
   void G26_line_to_destination(const float &feed_rate) {
     const float save_feedrate = feedrate_mm_s;
     feedrate_mm_s = feed_rate;      // use specified feed rate
-    prepare_move_to_destination();  // will ultimately call ubl.line_to_destination_cartesian or ubl.prepare_linear_move_to for UBL_DELTA
+    prepare_move_to_destination();  // will ultimately call ubl.line_to_destination_cartesian or ubl.prepare_linear_move_to for UBL_SEGMENTED
     feedrate_mm_s = save_feedrate;  // restore global feed rate
   }
 
@@ -279,6 +274,9 @@
                                     // action to give the user a more responsive 'Stop'.
           set_destination_from_current();
           idle();
+          MYSERIAL.flush();  // G26 takes a long time to complete.   PronterFace can
+                             // over run the serial character buffer with M105's without
+                             // this fix
         }
 
         wait_for_release();
@@ -286,7 +284,7 @@
         strcpy_P(lcd_status_message, PSTR("Done Priming")); // We can't do lcd_setstatusPGM() without having it continue;
                                                             // So... We cheat to get a message up.
         lcd_setstatusPGM(PSTR("Done Priming"), 99);
-        lcd_quick_feedback();
+        lcd_quick_feedback(true);
         lcd_external_control = false;
       }
       else
@@ -294,7 +292,7 @@
     {
       #if ENABLED(ULTRA_LCD)
         lcd_setstatusPGM(PSTR("Fixed Length Prime."), 99);
-        lcd_quick_feedback();
+        lcd_quick_feedback(true);
       #endif
       set_destination_from_current();
       destination[E_AXIS] += g26_prime_length;
@@ -489,7 +487,7 @@
       #if ENABLED(ULTRA_LCD)
         if (g26_bed_temp > 25) {
           lcd_setstatusPGM(PSTR("G26 Heating Bed."), 99);
-          lcd_quick_feedback();
+          lcd_quick_feedback(true);
           lcd_external_control = true;
       #endif
           thermalManager.setTargetBed(g26_bed_temp);
@@ -505,11 +503,14 @@
               SERIAL_EOL();
             }
             idle();
+            MYSERIAL.flush();  // G26 takes a long time to complete.   PronterFace can
+                               // over run the serial character buffer with M105's without
+                               // this fix
           }
       #if ENABLED(ULTRA_LCD)
         }
         lcd_setstatusPGM(PSTR("G26 Heating Nozzle."), 99);
-        lcd_quick_feedback();
+        lcd_quick_feedback(true);
       #endif
     #endif
 
@@ -527,11 +528,14 @@
         SERIAL_EOL();
       }
       idle();
-    }
 
+      MYSERIAL.flush();  // G26 takes a long time to complete.   PronterFace can
+                         // over run the serial character buffer with M105's without
+                         // this fix
+    }
     #if ENABLED(ULTRA_LCD)
       lcd_reset_status();
-      lcd_quick_feedback();
+      lcd_quick_feedback(true);
     #endif
 
     return G26_OK;
@@ -821,11 +825,16 @@
           //}
 
           print_line_from_here_to_there(rx, ry, g26_layer_height, xe, ye, g26_layer_height);
-
+          MYSERIAL.flush();  // G26 takes a long time to complete.   PronterFace can
+                             // over run the serial character buffer with M105's without
+                             // this fix
         }
         if (look_for_lines_to_connect())
           goto LEAVE;
       }
+      MYSERIAL.flush();  // G26 takes a long time to complete.   PronterFace can
+                         // over run the serial character buffer with M105's without
+                         // this fix
     } while (--g26_repeats && location.x_index >= 0 && location.y_index >= 0);
 
     LEAVE:
