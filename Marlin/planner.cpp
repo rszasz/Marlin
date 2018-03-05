@@ -58,19 +58,19 @@
  *
  */
 
-#include "MarlinConfig.h"
 #include "planner.h"
 #include "stepper.h"
 #include "temperature.h"
 #include "ultralcd.h"
 #include "language.h"
-#include "ubl.h"
 #include "gcode.h"
 
 #include "Marlin.h"
 
 #if ENABLED(MESH_BED_LEVELING)
   #include "mesh_bed_leveling.h"
+#elif ENABLED(AUTO_BED_LEVELING_UBL)
+  #include "ubl.h"
 #endif
 
 #if ENABLED(AUTO_POWER_CONTROL)
@@ -1680,8 +1680,7 @@ void Planner::refresh_positioning() {
 #if ENABLED(AUTOTEMP)
 
   void Planner::autotemp_M104_M109() {
-    autotemp_enabled = parser.seen('F');
-    if (autotemp_enabled) autotemp_factor = parser.value_celsius_diff();
+    if ((autotemp_enabled = parser.seen('F'))) autotemp_factor = parser.value_float();
     if (parser.seen('S')) autotemp_min = parser.value_celsius();
     if (parser.seen('B')) autotemp_max = parser.value_celsius();
   }

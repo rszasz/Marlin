@@ -774,8 +774,6 @@ void Stepper::isr() {
 
   void Stepper::advance_isr() {
 
-    nextAdvanceISR = eISR_Rate;
-
     #if ENABLED(MK2_MULTIPLEXER)
       // Even-numbered steppers are reversed
       #define SET_E_STEP_DIR(INDEX) \
@@ -879,12 +877,12 @@ void Stepper::isr() {
 
       // For minimum pulse time wait before looping
       #if EXTRA_CYCLES_E > 20
-        if (i) while (EXTRA_CYCLES_E > (uint32_t)(TCNT0 - pulse_start) * (INT0_PRESCALER)) { /* nada */ }
+        if (e_steps) while (EXTRA_CYCLES_E > (uint32_t)(TCNT0 - pulse_start) * (INT0_PRESCALER)) { /* nada */ }
       #elif EXTRA_CYCLES_E > 0
-        if (i) DELAY_NOPS(EXTRA_CYCLES_E);
+        if (e_steps) DELAY_NOPS(EXTRA_CYCLES_E);
       #endif
 
-    } // steps_loop
+    } // e_steps
   }
 
   void Stepper::advance_isr_scheduler() {
@@ -1596,10 +1594,15 @@ void Stepper::report_positions() {
   void Stepper::microstep_mode(const uint8_t driver, const uint8_t stepping_mode) {
     switch (stepping_mode) {
       case 1: microstep_ms(driver, MICROSTEP1); break;
-      case 2: microstep_ms(driver, MICROSTEP2); break;
-      case 4: microstep_ms(driver, MICROSTEP4); break;
+      #if ENABLED(HEROIC_STEPPER_DRIVERS)
+        case 128: microstep_ms(driver, MICROSTEP128); break;
+      #else
+        case 2: microstep_ms(driver, MICROSTEP2); break;
+        case 4: microstep_ms(driver, MICROSTEP4); break;
+      #endif
       case 8: microstep_ms(driver, MICROSTEP8); break;
       case 16: microstep_ms(driver, MICROSTEP16); break;
+      default: SERIAL_ERROR_START(); SERIAL_ERRORLNPGM("Microsteps unavailable"); break;
     }
   }
 

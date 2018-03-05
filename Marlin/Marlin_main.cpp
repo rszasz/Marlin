@@ -186,8 +186,8 @@
  * M380 - Activate solenoid on active extruder. (Requires EXT_SOLENOID)
  * M381 - Disable all solenoids. (Requires EXT_SOLENOID)
  * M400 - Finish all moves.
- * M401 - Lower Z probe. (Requires a probe)
- * M402 - Raise Z probe. (Requires a probe)
+ * M401 - Deploy and activate Z probe. (Requires a probe)
+ * M402 - Deactivate and stow Z probe. (Requires a probe)
  * M404 - Display or set the Nominal Filament Width: "W<diameter>". (Requires FILAMENT_WIDTH_SENSOR)
  * M405 - Enable Filament Sensor flow control. "M405 D<delay_cm>". (Requires FILAMENT_WIDTH_SENSOR)
  * M406 - Disable Filament Sensor flow control. (Requires FILAMENT_WIDTH_SENSOR)
@@ -220,7 +220,7 @@
  * M867 - Enable/disable or toggle error correction for position encoder modules.
  * M868 - Report or set position encoder module error correction threshold.
  * M869 - Report position encoder module error.
- * M900 - Get and/or Set advance K factor and WH/D ratio. (Requires LIN_ADVANCE)
+ * M900 - Get or Set Linear Advance K-factor. (Requires LIN_ADVANCE)
  * M906 - Set or get motor current in milliamps using axis codes X, Y, Z, E. Report values if no axis codes given. (Requires HAVE_TMC2130 or HAVE_TMC2208)
  * M907 - Set digital trimpot motor current using axis codes. (Requires a board with digital trimpots)
  * M908 - Control digital trimpot directly. (Requires DAC_STEPPER_CURRENT or DIGIPOTSS_PIN)
@@ -2852,6 +2852,49 @@ static void clean_up_after_endstop_or_probe_move() {
 
 #endif // AUTO_BED_LEVELING_BILINEAR
 
+#if ENABLED(SENSORLESS_HOMING)
+
+  /**
+   * Set sensorless homing if the axis has it, accounting for Core Kinematics.
+   */
+  void sensorless_homing_per_axis(const AxisEnum axis, const bool enable=true) {
+    switch (axis) {
+      #if X_SENSORLESS
+        case X_AXIS:
+          tmc_sensorless_homing(stepperX, enable);
+          #if CORE_IS_XY && Y_SENSORLESS
+            tmc_sensorless_homing(stepperY, enable);
+          #elif CORE_IS_XZ && Z_SENSORLESS
+            tmc_sensorless_homing(stepperZ, enable);
+          #endif
+          break;
+      #endif
+      #if Y_SENSORLESS
+        case Y_AXIS:
+          tmc_sensorless_homing(stepperY, enable);
+          #if CORE_IS_XY && X_SENSORLESS
+            tmc_sensorless_homing(stepperX, enable);
+          #elif CORE_IS_YZ && Z_SENSORLESS
+            tmc_sensorless_homing(stepperZ, enable);
+          #endif
+          break;
+      #endif
+      #if Z_SENSORLESS
+        case Z_AXIS:
+          tmc_sensorless_homing(stepperZ, enable);
+          #if CORE_IS_XZ && X_SENSORLESS
+            tmc_sensorless_homing(stepperX, enable);
+          #elif CORE_IS_YZ && Y_SENSORLESS
+            tmc_sensorless_homing(stepperY, enable);
+          #endif
+          break;
+      #endif
+      default: break;
+    }
+  }
+
+#endif // SENSORLESS_HOMING
+
 /**
  * Home an individual linear axis
  */
@@ -2878,15 +2921,7 @@ static void do_homing_move(const AxisEnum axis, const float distance, const floa
 
   // Disable stealthChop if used. Enable diag1 pin on driver.
   #if ENABLED(SENSORLESS_HOMING)
-    #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
-      if (axis == X_AXIS) tmc_sensorless_homing(stepperX);
-    #endif
-    #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
-      if (axis == Y_AXIS) tmc_sensorless_homing(stepperY);
-    #endif
-    #if ENABLED(Z_IS_TMC2130) && defined(Z_HOMING_SENSITIVITY)
-      if (axis == Z_AXIS) tmc_sensorless_homing(stepperZ);
-    #endif
+    sensorless_homing_per_axis(axis);
   #endif
 
   // Tell the planner the axis is at 0
@@ -2917,15 +2952,7 @@ static void do_homing_move(const AxisEnum axis, const float distance, const floa
 
   // Re-enable stealthChop if used. Disable diag1 pin on driver.
   #if ENABLED(SENSORLESS_HOMING)
-    #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
-      if (axis == X_AXIS) tmc_sensorless_homing(stepperX, false);
-    #endif
-    #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
-      if (axis == Y_AXIS) tmc_sensorless_homing(stepperY, false);
-    #endif
-    #if ENABLED(Z_IS_TMC2130) && defined(Z_HOMING_SENSITIVITY)
-      if (axis == Z_AXIS) tmc_sensorless_homing(stepperZ, false);
-    #endif
+    sensorless_homing_per_axis(axis, false);
   #endif
 
   #if ENABLED(DEBUG_LEVELING_FEATURE)
@@ -3448,8 +3475,7 @@ inline void gcode_G4() {
    */
   inline void gcode_G10() {
     #if EXTRUDERS > 1
-      const bool rs = parser.boolval('S');
-      fwretract.retracted_swap[active_extruder] = rs; // Use 'S' for swap, default to false
+      const bool rs = parser.boolval('S');      
     #endif
     fwretract.retract(true
       #if EXTRUDERS > 1
@@ -3619,12 +3645,8 @@ inline void gcode_G4() {
                 fr_mm_s = min(homing_feedrate(X_AXIS), homing_feedrate(Y_AXIS)) * SQRT(sq(mlratio) + 1.0);
 
     #if ENABLED(SENSORLESS_HOMING)
-      #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
-        tmc_sensorless_homing(stepperX);
-      #endif
-      #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
-        tmc_sensorless_homing(stepperY);
-      #endif
+      sensorless_homing_per_axis(X_AXIS);
+      sensorless_homing_per_axis(Y_AXIS);
     #endif
 
     do_blocking_move_to_xy(1.5 * mlx * x_axis_home_dir, 1.5 * mly * home_dir(Y_AXIS), fr_mm_s);
@@ -3632,12 +3654,8 @@ inline void gcode_G4() {
     current_position[X_AXIS] = current_position[Y_AXIS] = 0.0;
 
     #if ENABLED(SENSORLESS_HOMING)
-      #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
-        tmc_sensorless_homing(stepperX, false);
-      #endif
-      #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
-        tmc_sensorless_homing(stepperY, false);
-      #endif
+      sensorless_homing_per_axis(X_AXIS, false);
+      sensorless_homing_per_axis(Y_AXIS, false);
       safe_delay(500); // Short delay needed to settle
     #endif
   }
@@ -3803,15 +3821,9 @@ inline void gcode_G4() {
 
     // Disable stealthChop if used. Enable diag1 pin on driver.
     #if ENABLED(SENSORLESS_HOMING)
-      #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
-        tmc_sensorless_homing(stepperX);
-      #endif
-      #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
-        tmc_sensorless_homing(stepperY);
-      #endif
-      #if ENABLED(Z_IS_TMC2130) && defined(Z_HOMING_SENSITIVITY)
-        tmc_sensorless_homing(stepperZ);
-      #endif
+      sensorless_homing_per_axis(A_AXIS);
+      sensorless_homing_per_axis(B_AXIS);
+      sensorless_homing_per_axis(C_AXIS);
     #endif
 
     // Move all carriages together linearly until an endstop is hit.
@@ -3822,15 +3834,9 @@ inline void gcode_G4() {
 
     // Re-enable stealthChop if used. Disable diag1 pin on driver.
     #if ENABLED(SENSORLESS_HOMING)
-      #if ENABLED(X_IS_TMC2130) && defined(X_HOMING_SENSITIVITY)
-        tmc_sensorless_homing(stepperX, false);
-      #endif
-      #if ENABLED(Y_IS_TMC2130) && defined(Y_HOMING_SENSITIVITY)
-        tmc_sensorless_homing(stepperY, false);
-      #endif
-      #if ENABLED(Z_IS_TMC2130) && defined(Z_HOMING_SENSITIVITY)
-        tmc_sensorless_homing(stepperZ, false);
-      #endif
+      sensorless_homing_per_axis(A_AXIS, false);
+      sensorless_homing_per_axis(B_AXIS, false);
+      sensorless_homing_per_axis(C_AXIS, false);
     #endif
 
     // If an endstop was not hit, then damage can occur if homing is continued.
@@ -9651,12 +9657,12 @@ inline void gcode_M400() { stepper.synchronize(); }
 #if HAS_BED_PROBE
 
   /**
-   * M401: Engage Z Servo endstop if available
+   * M401: Deploy and activate the Z probe
    */
   inline void gcode_M401() { DEPLOY_PROBE(); }
 
   /**
-   * M402: Retract Z Servo endstop if enabled
+   * M402: Deactivate and stow the Z probe
    */
   inline void gcode_M402() { STOW_PROBE(); }
 
@@ -10458,19 +10464,24 @@ inline void gcode_M502() {
 
 #if ENABLED(LIN_ADVANCE)
   /**
-   * M900: Set and/or Get advance K factor
+   * M900: Get or Set Linear Advance K-factor
    *
-   *  K<factor>                  Set advance K factor
+   *  K<factor>   Set advance K factor
    */
   inline void gcode_M900() {
-    stepper.synchronize();
-
-    const float newK = parser.floatval('K', -1);
-    if (newK >= 0) planner.extruder_advance_K = newK;
-
-    SERIAL_ECHO_START();
-    SERIAL_ECHOPAIR("Advance K=", planner.extruder_advance_K);
-    SERIAL_EOL();
+    if (parser.seenval('K')) {
+      const float newK = parser.floatval('K');
+      if (WITHIN(newK, 0, 10)) {
+        stepper.synchronize();
+        planner.extruder_advance_K = newK;
+      }
+      else
+        SERIAL_PROTOCOLLNPGM("?K value out of range (0-10).");
+    }
+    else {
+      SERIAL_ECHO_START();
+      SERIAL_ECHOLNPAIR("Advance K=", planner.extruder_advance_K);
+    }
   }
 #endif // LIN_ADVANCE
 
@@ -10674,11 +10685,11 @@ inline void gcode_M502() {
       }
 
       #if Z_IS_TRINAMIC
-        uint16_t Z_current_1 = stepperZ.getCurrent(),
+        uint16_t Z_current_1 = stepperZ.getCurrent();
         stepperZ.setCurrent(_rms, R_SENSE, HOLD_MULTIPLIER);
       #endif
       #if Z2_IS_TRINAMIC
-        uint16_t Z2_current_1 = stepperZ.getCurrent();
+        uint16_t Z2_current_1 = stepperZ2.getCurrent();
         stepperZ2.setCurrent(_rms, R_SENSE, HOLD_MULTIPLIER);
       #endif
 
@@ -12683,15 +12694,6 @@ void set_current_from_steppers_for_axis(const AxisEnum axis) {
     // SERIAL_ECHOLNPAIR(" segments=", segments);
     // SERIAL_ECHOLNPAIR(" segment_mm=", cartesian_segment_mm);
 
-    #if ENABLED(SCARA_FEEDRATE_SCALING)
-      // SCARA needs to scale the feed rate from mm/s to degrees/s
-      // i.e., Complete the angular vector in the given time.
-      const float inv_segment_length = min(10.0, float(segments) / cartesian_mm), // 1/mm/segs
-                  inverse_secs = inv_segment_length * _feedrate_mm_s;
-      float oldA = stepper.get_axis_position_degrees(A_AXIS),
-            oldB = stepper.get_axis_position_degrees(B_AXIS);
-    #endif
-
     // Get the current position as starting point
     float raw[XYZE];
     COPY(raw, current_position);
@@ -12716,24 +12718,11 @@ void set_current_from_steppers_for_axis(const AxisEnum axis) {
 
       ADJUST_DELTA(raw); // Adjust Z if bed leveling is enabled
 
-      #if ENABLED(SCARA_FEEDRATE_SCALING)
-        // For SCARA scale the feed rate from mm/s to degrees/s
-        // i.e., Complete the angular vector in the given time.
-        planner.buffer_segment(delta[A_AXIS], delta[B_AXIS], raw[Z_AXIS], raw[E_AXIS], HYPOT(delta[A_AXIS] - oldA, delta[B_AXIS] - oldB) * inverse_secs, active_extruder, cartesian_segment_mm);
-        oldA = delta[A_AXIS]; oldB = delta[B_AXIS];
-      #else
-        planner.buffer_line(delta[A_AXIS], delta[B_AXIS], delta[C_AXIS], raw[E_AXIS], _feedrate_mm_s, active_extruder, cartesian_segment_mm);
-      #endif
+      planner.buffer_line(delta[A_AXIS], delta[B_AXIS], delta[C_AXIS], raw[E_AXIS], _feedrate_mm_s, active_extruder, cartesian_segment_mm);
     }
 
     // Ensure last segment arrives at target location.
-    #if ENABLED(SCARA_FEEDRATE_SCALING)
-      inverse_kinematics(rtarget);
-      ADJUST_DELTA(rtarget);
-      planner.buffer_segment(delta[A_AXIS], delta[B_AXIS], rtarget[Z_AXIS], rtarget[E_AXIS], HYPOT(delta[A_AXIS] - oldA, delta[B_AXIS] - oldB) * inverse_secs, active_extruder, cartesian_segment_mm);
-    #else
-      planner.buffer_line_kinematic(rtarget, _feedrate_mm_s, active_extruder, cartesian_segment_mm);
-    #endif
+    planner.buffer_line_kinematic(rtarget, _feedrate_mm_s, active_extruder, cartesian_segment_mm);
 
     return false; // caller will update current_position
   }
@@ -13022,14 +13011,6 @@ void prepare_move_to_destination() {
       int8_t arc_recalc_count = N_ARC_CORRECTION;
     #endif
 
-    #if ENABLED(SCARA_FEEDRATE_SCALING)
-      // SCARA needs to scale the feed rate from mm/s to degrees/s
-      const float inv_segment_length = 1.0 / (MM_PER_ARC_SEGMENT),
-                  inverse_secs = inv_segment_length * fr_mm_s;
-      float oldA = stepper.get_axis_position_degrees(A_AXIS),
-            oldB = stepper.get_axis_position_degrees(B_AXIS);
-    #endif
-
     for (uint16_t i = 1; i < segments; i++) { // Iterate (segments-1) times
 
       thermalManager.manage_heater();
@@ -13069,26 +13050,11 @@ void prepare_move_to_destination() {
 
       clamp_to_software_endstops(raw);
 
-      #if ENABLED(SCARA_FEEDRATE_SCALING)
-        // For SCARA scale the feed rate from mm/s to degrees/s
-        // i.e., Complete the angular vector in the given time.
-        inverse_kinematics(raw);
-        ADJUST_DELTA(raw);
-        planner.buffer_segment(delta[A_AXIS], delta[B_AXIS], raw[Z_AXIS], raw[E_AXIS], HYPOT(delta[A_AXIS] - oldA, delta[B_AXIS] - oldB) * inverse_secs, active_extruder);
-        oldA = delta[A_AXIS]; oldB = delta[B_AXIS];
-      #else
-        planner.buffer_line_kinematic(raw, fr_mm_s, active_extruder);
-      #endif
+      planner.buffer_line_kinematic(raw, fr_mm_s, active_extruder);
     }
 
     // Ensure last segment arrives at target location.
-    #if ENABLED(SCARA_FEEDRATE_SCALING)
-      inverse_kinematics(cart);
-      ADJUST_DELTA(cart);
-      planner.buffer_segment(delta[A_AXIS], delta[B_AXIS], cart[Z_AXIS], cart[E_AXIS], HYPOT(delta[A_AXIS] - oldA, delta[B_AXIS] - oldB) * inverse_secs, active_extruder);
-    #else
-      planner.buffer_line_kinematic(cart, fr_mm_s, active_extruder);
-    #endif
+    planner.buffer_line_kinematic(cart, fr_mm_s, active_extruder);
 
     // As far as the parser is concerned, the position is now == target. In reality the
     // motion control system might still be processing the action and the real tool position
