@@ -282,9 +282,11 @@ void lcd_printPGM_utf(const char *str, uint8_t n=LCD_WIDTH) {
 
     void lcd_custom_bootscreen() {
       constexpr u8g_uint_t left = (LCD_PIXEL_WIDTH  - (CUSTOM_BOOTSCREEN_BMPWIDTH)) / 2,
-                           top = (LCD_PIXEL_HEIGHT - (CUSTOM_BOOTSCREEN_BMPHEIGHT)) / 2,
-                           right = left + CUSTOM_BOOTSCREEN_BMPWIDTH,
-                           bottom = top + CUSTOM_BOOTSCREEN_BMPHEIGHT;
+                           top = (LCD_PIXEL_HEIGHT - (CUSTOM_BOOTSCREEN_BMPHEIGHT)) / 2;
+      #if ENABLED(CUSTOM_BOOTSCREEN_INVERTED)
+        constexpr u8g_uint_t right = left + CUSTOM_BOOTSCREEN_BMPWIDTH,
+                             bottom = top + CUSTOM_BOOTSCREEN_BMPHEIGHT;
+      #endif
       u8g.firstPage();
       do {
         u8g.drawBitmapP(
@@ -347,6 +349,13 @@ void lcd_printPGM_utf(const char *str, uint8_t n=LCD_WIDTH) {
 
 // Initialize or re-initialize the LCD
 static void lcd_implementation_init() {
+
+  #if ENABLED(MKS_12864OLED) || ENABLED(MKS_12864OLED_SSD1306)
+    SET_OUTPUT(LCD_PINS_DC);
+    OUT_WRITE(LCD_PINS_RS, LOW);
+    delay(1000);
+    WRITE(LCD_PINS_RS, HIGH);
+  #endif
 
   #if PIN_EXISTS(LCD_BACKLIGHT) // Enable LCD backlight
     OUT_WRITE(LCD_BACKLIGHT_PIN, HIGH);

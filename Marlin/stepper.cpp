@@ -111,8 +111,13 @@ volatile uint32_t Stepper::step_events_completed = 0; // The number of step even
            Stepper::final_adv_steps,
            Stepper::max_adv_steps;
 
-  int8_t Stepper::e_steps = 0,
-         Stepper::LA_active_extruder; // Copy from current executed block. Needed because current_block is set to NULL "too early".
+  int8_t Stepper::e_steps = 0;
+
+  #if E_STEPPERS > 1
+    int8_t Stepper::LA_active_extruder; // Copy from current executed block. Needed because current_block is set to NULL "too early".
+  #else
+    constexpr int8_t Stepper::LA_active_extruder;
+  #endif
 
   bool Stepper::use_advance_lead;
 
@@ -141,20 +146,20 @@ volatile long Stepper::endstops_trigsteps[XYZ];
   #define LOCKED_X2_MOTOR locked_x2_motor
   #define LOCKED_Y2_MOTOR locked_y2_motor
   #define LOCKED_Z2_MOTOR locked_z2_motor
-  #define DUAL_ENDSTOP_APPLY_STEP(AXIS,v)                                                                                                             \
-    if (performing_homing) {                                                                                                                          \
-      if (AXIS##_HOME_DIR < 0) {                                                                                                                      \
-        if (!(TEST(endstops.old_endstop_bits, AXIS##_MIN) && (count_direction[AXIS##_AXIS] < 0)) && !LOCKED_##AXIS##_MOTOR) AXIS##_STEP_WRITE(v);     \
-        if (!(TEST(endstops.old_endstop_bits, AXIS##2_MIN) && (count_direction[AXIS##_AXIS] < 0)) && !LOCKED_##AXIS##2_MOTOR) AXIS##2_STEP_WRITE(v);  \
-      }                                                                                                                                               \
-      else {                                                                                                                                          \
-        if (!(TEST(endstops.old_endstop_bits, AXIS##_MAX) && (count_direction[AXIS##_AXIS] > 0)) && !LOCKED_##AXIS##_MOTOR) AXIS##_STEP_WRITE(v);     \
-        if (!(TEST(endstops.old_endstop_bits, AXIS##2_MAX) && (count_direction[AXIS##_AXIS] > 0)) && !LOCKED_##AXIS##2_MOTOR) AXIS##2_STEP_WRITE(v);  \
-      }                                                                                                                                               \
-    }                                                                                                                                                 \
-    else {                                                                                                                                            \
-      AXIS##_STEP_WRITE(v);                                                                                                                           \
-      AXIS##2_STEP_WRITE(v);                                                                                                                          \
+  #define DUAL_ENDSTOP_APPLY_STEP(AXIS,v)                                                                                                           \
+    if (performing_homing) {                                                                                                                        \
+      if (AXIS##_HOME_DIR < 0) {                                                                                                                    \
+        if (!(TEST(endstops.old_endstop_bits, AXIS##_MIN) && count_direction[AXIS##_AXIS] < 0) && !LOCKED_##AXIS##_MOTOR) AXIS##_STEP_WRITE(v);     \
+        if (!(TEST(endstops.old_endstop_bits, AXIS##2_MIN) && count_direction[AXIS##_AXIS] < 0) && !LOCKED_##AXIS##2_MOTOR) AXIS##2_STEP_WRITE(v);  \
+      }                                                                                                                                             \
+      else {                                                                                                                                        \
+        if (!(TEST(endstops.old_endstop_bits, AXIS##_MAX) && count_direction[AXIS##_AXIS] > 0) && !LOCKED_##AXIS##_MOTOR) AXIS##_STEP_WRITE(v);     \
+        if (!(TEST(endstops.old_endstop_bits, AXIS##2_MAX) && count_direction[AXIS##_AXIS] > 0) && !LOCKED_##AXIS##2_MOTOR) AXIS##2_STEP_WRITE(v);  \
+      }                                                                                                                                             \
+    }                                                                                                                                               \
+    else {                                                                                                                                          \
+      AXIS##_STEP_WRITE(v);                                                                                                                         \
+      AXIS##2_STEP_WRITE(v);                                                                                                                        \
     }
 #endif
 
@@ -482,48 +487,27 @@ void Stepper::isr() {
   // Take multiple steps per interrupt (For high speed moves)
   bool all_steps_done = false;
   for (uint8_t i = step_loops; i--;) {
-    #if ENABLED(LIN_ADVANCE)
-
-      counter_E += current_block->steps[E_AXIS];
-      if (counter_E > 0) {
-        counter_E -= current_block->step_event_count;
-        #if DISABLED(MIXING_EXTRUDER)
-          // Don't step E here for mixing extruder
-          count_position[E_AXIS] += count_direction[E_AXIS];
-          motor_direction(E_AXIS) ? --e_steps : ++e_steps;
-        #endif
-      }
-
-      #if ENABLED(MIXING_EXTRUDER)
-        // Step mixing steppers proportionally
-        const bool dir = motor_direction(E_AXIS);
-        MIXING_STEPPERS_LOOP(j) {
-          counter_m[j] += current_block->steps[E_AXIS];
-          if (counter_m[j] > 0) {
-            counter_m[j] -= current_block->mix_event_count[j];
-            dir ? --e_steps[j] : ++e_steps[j];
-          }
-        }
-      #endif
-
-    #endif // LIN_ADVANCE
 
     #define _COUNTER(AXIS) counter_## AXIS
     #define _APPLY_STEP(AXIS) AXIS ##_APPLY_STEP
     #define _INVERT_STEP_PIN(AXIS) INVERT_## AXIS ##_STEP_PIN
 
     // Advance the Bresenham counter; start a pulse if the axis needs a step
-    #define PULSE_START(AXIS) \
+    #define PULSE_START(AXIS) do{ \
       _COUNTER(AXIS) += current_block->steps[_AXIS(AXIS)]; \
-      if (_COUNTER(AXIS) > 0) { _APPLY_STEP(AXIS)(!_INVERT_STEP_PIN(AXIS),0); }
+      if (_COUNTER(AXIS) > 0) { _APPLY_STEP(AXIS)(!_INVERT_STEP_PIN(AXIS), 0); } \
+    }while(0)
 
-    // Stop an active pulse, reset the Bresenham counter, update the position
-    #define PULSE_STOP(AXIS) \
+    // Advance the Bresenham counter; start a pulse if the axis needs a step
+    #define STEP_TICK(AXIS) do { \
       if (_COUNTER(AXIS) > 0) { \
         _COUNTER(AXIS) -= current_block->step_event_count; \
         count_position[_AXIS(AXIS)] += count_direction[_AXIS(AXIS)]; \
-        _APPLY_STEP(AXIS)(_INVERT_STEP_PIN(AXIS),0); \
-      }
+      } \
+    }while(0)
+
+    // Stop an active pulse, if any
+    #define PULSE_STOP(AXIS) _APPLY_STEP(AXIS)(_INVERT_STEP_PIN(AXIS), 0)
 
     /**
      * Estimate the number of cycles that the stepper logic already takes
@@ -583,7 +567,7 @@ void Stepper::isr() {
     /**
      * If a minimum pulse time was specified get the timer 0 value.
      *
-     * TCNT0 has an 8x prescaler, so it increments every 8 cycles.
+     * On AVR the TCNT0 timer has an 8x prescaler, so it increments every 8 cycles.
      * That's every 0.5µs on 16MHz and every 0.4µs on 20MHz.
      * 20 counts of TCNT0 -by itself- is a good pulse delay.
      * 10µs = 160 or 200 cycles.
@@ -602,8 +586,30 @@ void Stepper::isr() {
       PULSE_START(Z);
     #endif
 
-    // For non-advance use linear interpolation for E also
-    #if DISABLED(LIN_ADVANCE)
+    #if ENABLED(LIN_ADVANCE)
+
+      counter_E += current_block->steps[E_AXIS];
+      if (counter_E > 0) {
+        #if DISABLED(MIXING_EXTRUDER)
+          // Don't step E here for mixing extruder
+          motor_direction(E_AXIS) ? --e_steps : ++e_steps;
+        #endif
+      }
+
+      #if ENABLED(MIXING_EXTRUDER)
+        // Step mixing steppers proportionally
+        const bool dir = motor_direction(E_AXIS);
+        MIXING_STEPPERS_LOOP(j) {
+          counter_m[j] += current_block->steps[E_AXIS];
+          if (counter_m[j] > 0) {
+            counter_m[j] -= current_block->mix_event_count[j];
+            dir ? --e_steps[j] : ++e_steps[j];
+          }
+        }
+      #endif
+
+    #else // !LIN_ADVANCE - use linear interpolation for E also
+
       #if ENABLED(MIXING_EXTRUDER)
         // Keep updating the single E axis
         counter_E += current_block->steps[E_AXIS];
@@ -618,6 +624,18 @@ void Stepper::isr() {
         PULSE_START(E);
       #endif
     #endif // !LIN_ADVANCE
+
+    #if HAS_X_STEP
+      STEP_TICK(X);
+    #endif
+    #if HAS_Y_STEP
+      STEP_TICK(Y);
+    #endif
+    #if HAS_Z_STEP
+      STEP_TICK(Z);
+    #endif
+
+    STEP_TICK(E); // Always tick the single E axis
 
     // For minimum pulse time wait before stopping pulses
     #if EXTRA_CYCLES_XYZE > 20
@@ -639,11 +657,6 @@ void Stepper::isr() {
 
     #if DISABLED(LIN_ADVANCE)
       #if ENABLED(MIXING_EXTRUDER)
-        // Always step the single E axis
-        if (counter_E > 0) {
-          counter_E -= current_block->step_event_count;
-          count_position[E_AXIS] += count_direction[E_AXIS];
-        }
         MIXING_STEPPERS_LOOP(j) {
           if (counter_m[j] > 0) {
             counter_m[j] -= current_block->mix_event_count[j];
@@ -774,25 +787,23 @@ void Stepper::isr() {
 
   void Stepper::advance_isr() {
 
-    #if ENABLED(MK2_MULTIPLEXER)
-      // Even-numbered steppers are reversed
-      #define SET_E_STEP_DIR(INDEX) \
-        if (e_steps) E## INDEX ##_DIR_WRITE(e_steps < 0 ? !INVERT_E## INDEX ##_DIR ^ TEST(INDEX, 0) : INVERT_E## INDEX ##_DIR ^ TEST(INDEX, 0))
+    #if ENABLED(MK2_MULTIPLEXER) // For SNMM even-numbered steppers are reversed
+      #define SET_E_STEP_DIR(INDEX) do{ if (e_steps) E## INDEX ##_DIR_WRITE(e_steps < 0 ? !INVERT_E## INDEX ##_DIR ^ TEST(INDEX, 0) : INVERT_E## INDEX ##_DIR ^ TEST(INDEX, 0)); }while(0)
+    #elif ENABLED(DUAL_X_CARRIAGE) || ENABLED(DUAL_NOZZLE_DUPLICATION_MODE)
+      #define SET_E_STEP_DIR(INDEX) do{ if (e_steps) { if (e_steps < 0) REV_E_DIR(); else NORM_E_DIR(); } }while(0)
     #else
-      #define SET_E_STEP_DIR(INDEX) \
-        if (e_steps) E## INDEX ##_DIR_WRITE(e_steps < 0 ? INVERT_E## INDEX ##_DIR : !INVERT_E## INDEX ##_DIR)
+      #define SET_E_STEP_DIR(INDEX) do{ if (e_steps) E## INDEX ##_DIR_WRITE(e_steps < 0 ? INVERT_E## INDEX ##_DIR : !INVERT_E## INDEX ##_DIR); }while(0)
     #endif
 
-    #define START_E_PULSE(INDEX) \
-      if (e_steps) E## INDEX ##_STEP_WRITE(!INVERT_E_STEP_PIN)
+    #if ENABLED(DUAL_X_CARRIAGE) || ENABLED(DUAL_NOZZLE_DUPLICATION_MODE)
+      #define START_E_PULSE(INDEX) do{ if (e_steps) E_STEP_WRITE(!INVERT_E_STEP_PIN); }while(0)
+      #define STOP_E_PULSE(INDEX) do{ if (e_steps) { E_STEP_WRITE(INVERT_E_STEP_PIN); e_steps < 0 ? ++e_steps : --e_steps; } }while(0)
+    #else
+      #define START_E_PULSE(INDEX) do{ if (e_steps) E## INDEX ##_STEP_WRITE(!INVERT_E_STEP_PIN); }while(0)
+      #define STOP_E_PULSE(INDEX) do { if (e_steps) { e_steps < 0 ? ++e_steps : --e_steps; E## INDEX ##_STEP_WRITE(INVERT_E_STEP_PIN); } }while(0)
+    #endif
 
-    #define STOP_E_PULSE(INDEX) \
-      if (e_steps) { \
-        e_steps < 0 ? ++e_steps : --e_steps; \
-        E## INDEX ##_STEP_WRITE(INVERT_E_STEP_PIN); \
-      }
-
-    if (current_block->use_advance_lead) {
+    if (use_advance_lead) {
       if (step_events_completed > LA_decelerate_after && current_adv_steps > final_adv_steps) {
         e_steps--;
         current_adv_steps--;
@@ -812,7 +823,7 @@ void Stepper::isr() {
     else
       nextAdvanceISR = ADV_NEVER;
 
-    switch(LA_active_extruder) {
+    switch (LA_active_extruder) {
       case 0: SET_E_STEP_DIR(0); break;
       #if EXTRUDERS > 1
         case 1: SET_E_STEP_DIR(1); break;
@@ -835,7 +846,7 @@ void Stepper::isr() {
         uint32_t pulse_start = TCNT0;
       #endif
 
-      switch(LA_active_extruder) {
+      switch (LA_active_extruder) {
         case 0: START_E_PULSE(0); break;
         #if EXTRUDERS > 1
           case 1: START_E_PULSE(1); break;
@@ -859,7 +870,7 @@ void Stepper::isr() {
         DELAY_NOPS(EXTRA_CYCLES_E);
       #endif
 
-      switch(LA_active_extruder) {
+      switch (LA_active_extruder) {
         case 0: STOP_E_PULSE(0); break;
         #if EXTRUDERS > 1
           case 1: STOP_E_PULSE(1); break;
@@ -1234,7 +1245,7 @@ void Stepper::quick_stop() {
   #endif
 }
 
-void Stepper::endstop_triggered(AxisEnum axis) {
+void Stepper::endstop_triggered(const AxisEnum axis) {
 
   #if IS_CORE
 
@@ -1319,6 +1330,7 @@ void Stepper::report_positions() {
       _ENABLE(AXIS);                                        \
       _SAVE_START;                                          \
       _APPLY_DIR(AXIS, _INVERT_DIR(AXIS)^direction^INVERT); \
+      _PULSE_WAIT;                                          \
       _APPLY_STEP(AXIS)(!_INVERT_STEP_PIN(AXIS), true);     \
       _PULSE_WAIT;                                          \
       _APPLY_STEP(AXIS)(_INVERT_STEP_PIN(AXIS), true);      \
