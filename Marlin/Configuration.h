@@ -370,9 +370,9 @@
   // If you are using a pre-configured hotend then you can use one of the value sets by uncommenting it
 
   // 
-  #define  DEFAULT_Kp 28.33
-  #define  DEFAULT_Ki 2.01
-  #define  DEFAULT_Kd 99.81
+  #define  DEFAULT_Kp 27.69
+  #define  DEFAULT_Ki 1.95
+  #define  DEFAULT_Kd 98.10
 
   // Ultimaker
   //#define  DEFAULT_Kp 22.2
@@ -1244,11 +1244,11 @@
 
 // Preheat Constants
 #define PREHEAT_1_TEMP_HOTEND 185
-#define PREHEAT_1_TEMP_BED     70
+#define PREHEAT_1_TEMP_BED     15
 #define PREHEAT_1_FAN_SPEED   255 // Value from 0 to 255
 
-#define PREHEAT_2_TEMP_HOTEND 240
-#define PREHEAT_2_TEMP_BED    100
+#define PREHEAT_2_TEMP_HOTEND 200
+#define PREHEAT_2_TEMP_BED    15
 #define PREHEAT_2_FAN_SPEED   255 // Value from 0 to 255
 
 /**
@@ -1566,6 +1566,10 @@
 // Note: Usually sold with a white PCB.
 //
 #define REPRAP_DISCOUNT_SMART_CONTROLLER
+
+#define ST7920_DELAY_1 DELAY_0_NOP
+#define ST7920_DELAY_2 DELAY_1_NOP
+#define ST7920_DELAY_3 DELAY_2_NOP
 
 //
 // GADGETS3D G3D LCD/SD Controller
