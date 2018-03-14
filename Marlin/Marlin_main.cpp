@@ -263,7 +263,7 @@
 #include "printcounter.h"
 #include "duration_t.h"
 #include "types.h"
-#include "gcode.h"
+#include "parser.h"
 
 #if ENABLED(AUTO_POWER_CONTROL)
   #include "power.h"
@@ -3093,7 +3093,7 @@ static void homeaxis(const AxisEnum axis) {
   // Clear retracted status if homing the Z axis
   #if ENABLED(FWRETRACT)
     if (axis == Z_AXIS)
-      for (uint8_t i = 0; i < EXTRUDERS; i++) fwretract.retracted[i] = false;
+      fwretract.hop_amount = 0.0;
   #endif
 
   #if ENABLED(DEBUG_LEVELING_FEATURE)
